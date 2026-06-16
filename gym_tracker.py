@@ -11,13 +11,8 @@ st.set_page_config(
 )
 
 # تصميم الواجهة وتنسيق النصوص العربية
-st.markdown("""
-    <style>
-    .reportview-container .main .block-container{ max-width: 90%; }
-    h1, h2, h3, p, div { text-align: right; direction: rtl; }
-    .stButton>button { width: 100%; background-color: #2e7d32; color: white; }
-    </style>
-    """, unsafe_allowed_html=True)
+st.markdown("<style>h1, h2, h3, p, div { text-align: right; direction: rtl; }</style>", unsafe_allowed_html=True)
+
 
 st.title("🏋️‍♂️ مفكرة التمارين الرياضية السحابية")
 st.subheader("سجل تمارينك من الموبايل وتابعها من كمبيوترك في أي وقت!")
