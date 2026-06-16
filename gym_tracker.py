@@ -7,7 +7,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # إعدادات الصفحة
-st.set_page_config(page_title="متابع الأنشطة الرياضية السحابي", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="مفكرة التمارين", layout="wide", initial_sidebar_state="collapsed")
 
 # تطبيق نمط RTL (من اليمين إلى اليسار) للواجهة العربية
 st.markdown("""
