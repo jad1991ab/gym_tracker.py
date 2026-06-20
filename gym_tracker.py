@@ -1,202 +1,184 @@
 import streamlit as st
 import pandas as pd
-import datetime
-import os
+from datetime import datetime
 import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # إعدادات الصفحة
-st.set_page_config(page_title="متابع الأنشطة اليومية المطور", layout="wide")
-st.title("📊 نظام متابعة وإحصائيات الأنشطة اليومية")
+st.set_page_config(page_title="متابع الأنشطة الرياضية السحابي", layout="wide", initial_sidebar_state="expanded")
 
-# اسم ملف تخزين البيانات
-DB_FILE = "activity_db.csv"
-
-# دالة لتحميل البيانات المخزنة أو إنشاء ملف جديد إذا لم يوجد
-def load_data():
-    if os.path.exists(DB_FILE):
-        df = pd.read_csv(DB_FILE)
-        # التأكد من وجود عمود المعرف الفريد ID لإمكانية الحذف بدقة
-        if 'ID' not in df.columns and not df.empty:
-            df['ID'] = range(len(df))
-        return df
-    else:
-        return pd.DataFrame(columns=['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
-
-# تحميل البيانات في الجلسة
-if 'db' not in st.session_state:
-    st.session_state.db = load_data()
-
-df_db = st.session_state.db
-
-# ==========================================
-# 1. قسم الإحصائيات (أعلى الصفحة)
-# ==========================================
-st.subheader("📈 لوحة الإحصائيات العامة")
-
-if not df_db.empty:
-    now = datetime.datetime.now()
-    current_year = now.year
-    current_month = now.strftime('%B')
-    current_week = now.isocalendar().week
-
-    # حساب العدادات
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("### 🏋️‍♂️ النادي")
-        total_gym = len(df_db[df_db['النشاط'] == 'النادي 🏋️‍♂️'])
-        month_gym = len(df_db[(df_db['النشاط'] == 'النادي 🏋️‍♂️') & (df_db['الشهر'] == current_month) & (df_db['السنة'] == current_year)])
-        week_gym = len(df_db[(df_db['النشاط'] == 'النادي 🏋️‍♂️') & (df_db['الأسبوع'] == current_week) & (df_db['السنة'] == current_year)])
-        st.metric("إجمالي السنة", f"{total_gym} مرة")
-        st.caption(f"هذا الشهر: {month_gym} | هذا الأسبوع: {week_gym}")
-
-    with col2:
-        st.markdown("### 📚 الدراسة")
-        total_study = len(df_db[df_db['النشاط'] == 'الدراسة 📚'])
-        month_study = len(df_db[(df_db['النشاط'] == 'الدراسة 📚') & (df_db['الشهر'] == current_month) & (df_db['السنة'] == current_year)])
-        week_study = len(df_db[(df_db['النشاط'] == 'الدراسة 📚') & (df_db['الأسبوع'] == current_week) & (df_db['السنة'] == current_year)])
-        st.metric("إجمالي السنة", f"{total_study} مرة")
-        st.caption(f"هذا الشهر: {month_study} | هذا الأسبوع: {week_study}")
-
-    with col3:
-        st.markdown("### 💼 العمل")
-        total_work = len(df_db[df_db['النشاط'] == 'العمل 💼'])
-        month_work = len(df_db[(df_db['النشاط'] == 'العمل 💼') & (df_db['الشهر'] == current_month) & (df_db['السنة'] == current_year)])
-        week_work = len(df_db[(df_db['النشاط'] == 'العمل 💼') & (df_db['الأسبوع'] == current_week) & (df_db['السنة'] == current_year)])
-        st.metric("إجمالي السنة", f"{total_work} مرة")
-        st.caption(f"هذا الشهر: {month_work} | هذا الأسبوع: {week_work}")
-        
-    # رسم بياني للمقارنة بين الأنشطة
-    st.markdown("#### مقارنة الأنشطة شهرياً")
-    summary = df_db.groupby(['الشهر', 'النشاط']).size().unstack(fill_value=0)
-    st.bar_chart(summary)
-else:
-    st.info("لا توجد بيانات مسجلة بعد. قم بإدخال أول نشاط لك من القوائم أدناه لتظهر الإحصائيات هنا.")
-
-st.markdown("---")
-
-# ==========================================
-# 2. قسم إدخال البيانات (Drop Menus المطور)
-# ==========================================
-st.subheader("📥 تسجيل نشاط جديد")
-
-this_year = datetime.datetime.now().year
-years_list = list(range(this_year, this_year + 21))
-months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-days_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-hours_list = [f"{str(i).zfill(2)}:00" for i in range(24)]
-activities_list = ["النادي 🏋️‍♂️", "الدراسة 📚", "العمل 💼"]
-
-c1, c2, c3, c4, c5 = st.columns(5)
-
-with c1:
-    selected_activity = st.selectbox("النشاط", activities_list)
-with c2:
-    selected_year = st.selectbox("السنة", years_list, index=0) 
-with c3:
-    current_month_name = datetime.datetime.now().strftime('%B')
-    default_month_idx = months_list.index(current_month_name) if current_month_name in months_list else 0
-    selected_month = st.selectbox("الشهر", months_list, index=default_month_idx)
-with c4:
-    current_day_name = datetime.datetime.now().strftime('%A')
-    default_day_idx = days_list.index(current_day_name) if current_day_name in days_list else 0
-    selected_day = st.selectbox("اليوم", days_list, index=default_day_idx)
-with c5:
-    selected_hour = st.selectbox("الساعة", hours_list, index=16)
-
-# زر الحفظ
-if st.button("➕ تسجيل النشاط وحفظه", use_container_width=True):
-    month_num = months_list.index(selected_month) + 1
-    try:
-        approx_date = datetime.datetime(selected_year, month_num, 1)
-        week_num = approx_date.isocalendar().week
-    except:
-        week_num = datetime.datetime.now().isocalendar().week
-    
-    # توليد معرف فريد يعتمد على الوقت الحالي
-    unique_id = int(datetime.datetime.now().timestamp() * 1000)
-    
-    new_row = {
-        'ID': unique_id,
-        'التاريخ': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'السنة': selected_year,
-        'الشهر': selected_month,
-        'الأسبوع': week_num,
-        'اليوم': selected_day,
-        'الساعة': selected_hour,
-        'النشاط': selected_activity
+# تطبيق نمط RTL (من اليمين إلى اليسار) للواجهة العربية
+st.markdown("""
+    <style>
+    body, div, p, h1, h2, h3, h4, h5, h6, label, input, button, select {
+        direction: RTL;
+        text-align: right;
     }
-    
-    df_db = pd.concat([df_db, pd.DataFrame([new_row])], ignore_index=True)
-    df_db.to_csv(DB_FILE, index=False)
-    st.session_state.db = df_db
-    st.success(f"تم تسجيل نشاط ({selected_activity}) بنجاح!")
-    st.rerun()
+    .stButton>button {
+        width: 100%;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# ==========================================
-# 3. عرض السجل مع خاصية حذف سطر معين والتصدير
-# ==========================================
-if not df_db.empty:
-    st.markdown("---")
-    st.subheader("📋 إدارة وحذف الأنشطة المدخلة")
-    
-    # تحضير جدول تفاعلي يحتوي على خانة اختيار للحذف (Delete)
-    # نقوم بعمل نسخة للعرض فقط بدون إظهار عمود الـ ID الداخلي للمستخدم
-    display_df = df_db.copy()
-    display_df['حذف؟'] = False
-    
-    # إعادة الترتيب ليظهر عمود الحذف كأول عمود تفاعلي
-    cols = ['حذف؟'] + [col for col in display_df.columns if col not in ['حذف؟', 'ID']]
-    display_df = display_df[cols]
-    
-    st.write("إذا أردت حذف أي نشاط، ضع علامة (صح) بجانبه في الجدول أدناه ثم اضغط على زر 'تأكيد حذف الأنشطة المحددة':")
-    
-    edited_display = st.data_editor(
-        display_df,
-        column_config={
-            "حذف؟": st.column_config.CheckboxColumn("إجراء الحذف", help="حدد الخانة لحذف هذا السطر", default=False)
-        },
-        disabled=[col for col in display_df.columns if col != 'حذف؟'], # منع تعديل باقي البيانات
-        hide_index=True,
-        use_container_width=True,
-        key="data_editor_delete"
-    )
-    
-    # زر تفعيل الحذف للأسطر المحددة
-    indices_to_delete = edited_display[edited_display['حذف؟'] == True].index
-    
-    if len(indices_to_delete) > 0:
-        if st.button("🗑️ تأكيد حذف الأنشطة المحددة", type="primary"):
-            # تحديد وحذف الأسطر المقابلة في قاعدة البيانات الأصلية
-            df_db = df_db.drop(indices_to_delete).reset_index(drop=True)
-            df_db.to_csv(DB_FILE, index=False)
-            st.session_state.db = df_db
-            st.success("تم حذف الأنشطة المحددة بنجاح!")
-            st.rerun()
+# الاتصال بقاعدة بيانات جوجل شيتس السحابية
+# ملاحظة: سيقوم Streamlit بالاتصال تلقائياً عبر الإعدادات السحابية
+try:
+    conn = st.connection("gsheets", type="sheets")
+    # قراءة البيانات (تأكد من تسمية الورقة الأولى بـ Sheet1 أو تعديلها بالأسفل)
+    df = conn.read(ttl="0")
+    # إذا كانت الورقة فارغة، نقوم بتجهيز الأعمدة الأساسية
+    if df.empty or len(df.columns) < 5:
+        df = pd.DataFrame(columns=["المعرف", "التاريخ", "نوع التمرين", "المدة (دقائق)", "ملاحظات"])
+except Exception as e:
+    st.error("جاري الاتصال بقاعدة البيانات السحابية أو إعدادها لأول مرة...")
+    df = pd.DataFrame(columns=["المعرف", "التاريخ", "نوع التمرين", "المدة (دقائق)", "ملاحظات"])
 
-    st.markdown("---")
-    # زر تصدير ملف إكسل منسق جاهز ومصلح من اليمين لليسار تلقائياً
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        # تصدير البيانات بدون عمود الـ ID
-        df_db.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
-        workbook  = writer.book
-        worksheet = writer.sheets['الأنشطة اليومية']
-        worksheet.views.sheetView[0].showGridLines = True
-        worksheet.sheet_view.rightToLeft = True 
+st.title("🏋️‍♂️ مفكرة التمارين الرياضية السحابية")
+st.write("سجل تمارينك من الموبايل في النادي وتابعها من كمبيوترك في أي وقت!")
 
-    st.download_button(
-        label="📥 تحميل سجل تمارينك كملف Excel منسق جاهز ومصلح",
-        data=buffer.getvalue(),
-        file_name="my_gym_activities.xlsx",
-        mime="application/vnd.ms-excel",
-        use_container_width=True
-    )
+# سحب جانبي لإدخال البيانات
+with st.sidebar:
+    st.header("📝 تسجيل نشاط جديد")
     
-    st.markdown("---")
-    if st.button("🚨 مسح السجل بالكامل والبدء من جديد"):
-        if os.path.exists(DB_FILE):
-            os.remove(DB_FILE)
-        st.session_state.db = pd.DataFrame(columns=['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
-        st.success("تم مسح البيانات بالكامل!")
+    # نموذج الإدخال
+    input_date = st.date_input("تاريخ التمرين", datetime.now().date())
+    exercise_type = st.selectbox("نوع التمرين", ["حديد / مقاومة", "كارديو (جري/مشي)", "سباحة", "كرة قدم", "لياقة بدنية / سويدي", "أخرى"])
+    duration = st.number_input("المدة (بالدقائق)", min_value=1, max_value=300, value=45, step=5)
+    notes = st.text_area("ملاحظات إضافية", placeholder="مثال: تمرین رجلين، شدة عالية...")
+    
+    submit_button = st.button("💾 حفظ التمرين سحابياً")
+
+# معالجة إضافة تمرين جديد
+if submit_button:
+    # توليد معرف فريد يعتمد على الوقت الحالي لمنع التكرار وتسهيل الحذف
+    unique_id = datetime.now().strftime("%Y%m%d%H%M%S")
+    
+    new_data = pd.DataFrame({
+        "المعرف": [unique_id],
+        "التاريخ": [str(input_date)],
+        "نوع التمرين": [exercise_type],
+        "المدة (دقائق)": [int(duration)],
+        "ملاحظات": [notes]
+    })
+    
+    # دمج البيانات وتحديث الجوجل شيتس سحابياً
+    updated_df = pd.concat([df, new_data], ignore_value=True) if not df.empty else new_data
+    
+    try:
+        conn.update(data=updated_df)
+        st.sidebar.success("✅ تم حفظ التمرين في قاعدة البيانات السحابية!")
         st.rerun()
+    except Exception as e:
+        st.sidebar.error(f"حدث خطأ أثناء الحفظ السحابي: {e}")
+
+# عرض البيانات والإحصائيات في الصفحة الرئيسية
+st.header("📊 سجل التمارين المسجلة")
+
+if not df.empty and len(df) > 0:
+    # عرض إحصائيات سريعة
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("إجمالي التمارين", f"{len(df)} تمارين")
+    with col2:
+        st.metric("مجموع الدقائق الرياضية", f"{int(df['المدة (دقائق)'].astype(int).sum())} دقيقة")
+    with col3:
+        st.metric("أكثر تمرين تكراراً", df["نوع التمرين"].mode()[0] if not df["نوع التمرين"].empty else "غير محدد")
+    
+    st.write("---")
+    
+    # عرض الجدول مع زر حذف لكل سطر
+    # نقوم بعمل حلقة لعرض الأسطر بشكل منسق مع خيار الحذف
+    for index, row in df.iterrows():
+        # إنشاء حاوية لكل تمرين تظهر بشكل بطاقة منسقة
+        with st.container():
+            c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 4, 1.5])
+            with c1:
+                st.write(f"📅 **{row['التاريخ']}**")
+            with c2:
+                st.write(f"💪 **{row['نوع التمرين']}**")
+            with c3:
+                st.write(f"⏱️ **{row['المدة (دقائق)']} دقيقة**")
+            with c4:
+                st.write(f"📝 {row['ملاحظات'] if pd.notna(row['ملاحظات']) else '-'}")
+            with c5:
+                # زر الحذف يعتمد على المعرف الفريد للسطر
+                delete_clicked = st.button("🗑️ حذف", key=f"del_{row['المعرف']}")
+                if delete_clicked:
+                    # حذف السطر بناءً على المعرف فريد
+                    updated_df = df[df["المعرف"] != row["المعرف"]]
+                    try:
+                        conn.update(data=updated_df)
+                        st.success("🗑️ تم حذف التمرين بنجاح سحابياً!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"خطأ أثناء الحذف: {e}")
+        st.markdown("<hr style='margin:0.5em 0px; border-color:#eee;'>", unsafe_allow_html=True)
+
+    # 📥 بناء ملف الإكسل الاحترافي المنسق للتحميل
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "سجل التمارين الرياضية"
+    ws.views.sheetView[0].rightToLeft = True  # جعل الملف من اليمين إلى اليسار ناتيف
+
+    # تجهيز الداتا فريم للتصدير بدون عمود المعرف الفريد لإبقاء المظهر نظيفاً
+    export_df = df.drop(columns=["المعرف"])
+    
+    # كتابة العناوين وتنسيقها
+    for r in dataframe_to_rows(export_df, index=False, header=True):
+        ws.append(r)
+
+    # الألوان والتنسيقات
+    header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+    header_font = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    data_font = Font(name="Arial", size=11, color="000000")
+    center_align = Alignment(horizontal="center", vertical="center")
+    right_align = Alignment(horizontal="right", vertical="center")
+    
+    thin_border = Border(
+        left=Side(style='thin', color='D9D9D9'),
+        right=Side(style='thin', color='D9D9D9'),
+        top=Side(style='thin', color='D9D9D9'),
+        bottom=Side(style='thin', color='D9D9D9')
+    )
+
+    # تطبيق التنسيق على الصف الأول (العناوين)
+    for cell in ws[1]:
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center_align
+        cell.border = thin_border
+    ws.row_dimensions[1].height = 28
+
+    # تطبيق التنسيقات على بقية أسطر البيانات
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for cell in row:
+            cell.font = data_font
+            cell.border = thin_border
+            if cell.column in [1, 3]:  # التاريخ والمدة في المنتصف
+                cell.alignment = center_align
+            else:
+                cell.alignment = right_align
+        ws.row_dimensions[row[0].row].height = 22
+
+    # ضبط تلقائي لعرض الأعمدة بناءً على المحتوى لتجنب اختفاء النصوص
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = col[0].column_letter
+        ws.column_dimensions[col_letter].width = max(max_len + 5, 15)
+
+    # تحويل ملف الإكسل المنسق إلى سيل من البايتات ليدعم تحميله عبر المتصفح مباشرة
+    excel_buffer = io.BytesIO()
+    wb.save(excel_buffer)
+    excel_buffer.seek(0)
+
+    st.write(" ")
+    st.download_button(
+        label="📥 تحميل سجل التمارين كاملاً كملف Excel منسق",
+        data=excel_buffer,
+        file_name=f"gym_activities_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+else:
+    st.info("💡 لا توجد تمارين مسجلة سحابياً حتى الآن. ابدأ بتسجيل أول تمرين لك من القائمة الجانبية!")
