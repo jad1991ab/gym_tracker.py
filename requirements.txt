@@ -1,7 +1,7 @@
 streamlit
 pandas
 gspread
-google-oauth2
+google-auth
 gspread-dataframe
 openpyxl
 plotly
