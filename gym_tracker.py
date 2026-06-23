@@ -72,7 +72,7 @@ if 'db' not in st.session_state:
 df_db = st.session_state.db
 
 # ==========================================
-# 1. شريط التحفيز والتقدم اليومي (جديد)
+# 1. شريط التحفيز والتقدم اليومي
 # ==========================================
 now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
@@ -84,7 +84,6 @@ total_today_hours = round(total_today_minutes / 60, 1)
 st.subheader("🎯 مؤشر الإنجاز اليومي")
 col_p1, col_p2 = st.columns([4, 1])
 with col_p1:
-    # هدف يومي افتراضي: ساعتين إنجاز (120 دقيقة)
     progress_percent = min(int((total_today_minutes / 120) * 100), 100)
     st.progress(progress_percent / 100)
 with col_p2:
@@ -162,10 +161,17 @@ st.markdown("---")
 # ==========================================
 st.subheader("📥 تسجيل نشاط جديد")
 
-# ميزة مذهلة: اختيار التسجيل السريع أو اليدوي
+# ميزة اختيار التسجيل السريع أو اليدوي
 auto_time = st.toggle("التسجيل التلقائي بالوقت الحالي فوراً ⚡", value=True)
 
 activities_list = ["النادي 🏋️‍♂️", "الدراسة 📚", "العمل 💼"]
+
+# استخراج النصوص الحالية للوقت لتفادي أي عطل بالـ Index
+current_month_name = now.strftime('%B')
+current_day_name = now.strftime('%A')
+months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+days_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+hours_list = [f"{str(i).zfill(2)}:00" for i in range(24)]
 
 if auto_time:
     # واجهة مبسطة جداً عند التفعيل التلقائي
@@ -173,33 +179,32 @@ if auto_time:
     with c1:
         selected_activity = st.selectbox("النشاط", activities_list)
     with c2:
-        duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
+        # قمنا بجعل الـ step صريحاً بـ 0.5 لتفادي تعارض الفواصل العشرية بالمتصفح
+        duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.5, max_value=24.0, value=1.0, step=0.5)
     
-    # تحديد قيم الوقت الحالية برمجياً
+    # تحديد قيم الوقت الحالية برمجياً وثابتة
     selected_year = now.year
-    selected_month = now.strftime('%B')
-    selected_day = now.strftime('%A')
+    selected_month = current_month_name
+    selected_day = current_day_name
     selected_hour = f"{str(now.hour).zfill(2)}:00"
 else:
-    # إظهار القوائم الكاملة إذا أراد المستخدم تسجيل وقت سابق يدوياً
+    # إظهار القوائم الكاملة وإصلاح ترتيب المتغيرات لمنع الـ NameError
     this_year = now.year
-    years_list = list(range(this_year, this_year + 5))
-    months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-    days_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    hours_list = [f"{str(i).zfill(2)}:00" for i in range(24)]
+    years_list = list(range(this_year - 1, this_year + 5)) # إتاحة السنة الماضية والسنة الحالية والقادمة
     
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     with c1:
         selected_activity = st.selectbox("النشاط", activities_list)
     with c2:
-        duration_hours = st.number_input("المدة (ساعة)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
+        duration_hours = st.number_input("المدة (ساعة)", min_value=0.5, max_value=24.0, value=1.0, step=0.5)
     with c3:
-        selected_year = st.selectbox("السنة", years_list, index=0) 
+        selected_year = st.selectbox("السنة", years_list, index=years_list.index(this_year)) 
     with c4:
-        default_month_idx = months_list.index(selected_month) if selected_month in months_list else 0
+        # قمنا بنقل استخراج الـ index إلى هنا بعد أن تم التأكد من تحميل القائمة بشكل آمن
+        default_month_idx = months_list.index(current_month_name) if current_month_name in months_list else 0
         selected_month = st.selectbox("الشهر", months_list, index=default_month_idx)
     with c5:
-        default_day_idx = days_list.index(selected_day) if selected_day in days_list else 0
+        default_day_idx = days_list.index(current_day_name) if current_day_name in days_list else 0
         selected_day = st.selectbox("اليوم", days_list, index=default_day_idx)
     with c6:
         selected_hour = st.selectbox("الساعة", hours_list, index=now.hour)
@@ -211,7 +216,6 @@ if st.button("➕ تسجيل النشاط وحفظه", use_container_width=True,
         exact_timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
     else:
         try:
-            months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
             month_num = months_list.index(selected_month) + 1
             approx_date = datetime.datetime(selected_year, month_num, 1)
             week_num = int(approx_date.isocalendar().week)
@@ -254,7 +258,6 @@ if not df_db.empty:
     display_df['المدة (ساعات)'] = round(display_df['المدة_بالدقائق'] / 60, 2)
     
     cols = ['حذف؟', 'التاريخ', 'النشاط', 'المدة (ساعات)', 'اليوم', 'الساعة']
-    # التأكد من وجود الأعمدة المحددة فقط للعرض الجمالي
     display_df = display_df[[c for c in cols if c in display_df.columns]]
     
     st.write("إذا أردت حذف أي نشاط، ضع علامة (صح) بجانبه ثم اضغط زر الحذف بالأسفل:")
