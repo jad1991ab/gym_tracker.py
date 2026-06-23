@@ -29,7 +29,7 @@ def get_sheet():
 
 sheet = get_sheet()
 
-# الأعمدة الأساسية
+# الأعمدة الأساسية الشاملة للميزة الجديدة
 COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق']
 
 try:
@@ -48,8 +48,11 @@ def load_data():
         if len(records) == 0:
             return pd.DataFrame(columns=COLUMNS)
         df = pd.DataFrame(records)
+        
+        # 🛡️ حل حماية إضافي: إذا كان العمود غير موجود في شيت جوجل القديم، يتم إنشاؤه برمجياً فوراً
         if 'المدة_بالدقائق' not in df.columns:
             df['المدة_بالدقائق'] = 60
+            
         return df
     except Exception as e:
         st.error(f"خطأ أثناء قراءة Google Sheet: {e}")
@@ -73,7 +76,6 @@ now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
 
 if not df_db.empty:
-    # تنظيف وتجهيز عمود التاريخ للرسم البياني ومخطط الالتزام
     df_db['تاريخ_صحيح'] = pd.to_datetime(df_db['التاريخ'], errors='coerce')
     df_db['تاريخ_يومي_مختصر'] = df_db['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
     df_db['المدة_بالدقائق'] = pd.to_numeric(df_db['المدة_بالدقائق'], errors='coerce').fillna(0)
@@ -86,12 +88,15 @@ else:
 st.subheader("🎯 مؤشر الإنجاز ومقارنة الأداء")
 
 today_activities = df_db[df_db['تاريخ_يومي_مختصر'] == today_str] if not df_db.empty else pd.DataFrame()
-total_today_hours = round(today_activities['المدة_بالدقائق'].sum() / 60, 1)
 
-# حساب مقارنة الأداء (اليوم الحالي مقارنة بمتوسط الأيام السابقة)
+# تأمين الحساب حتى لو لم تكن هناك بيانات للعمود بعد
+if not today_activities.empty and 'المدة_بالدقائق' in today_activities.columns:
+    total_today_hours = round(today_activities['المدة_بالدقائق'].sum() / 60, 1)
+else:
+    total_today_hours = 0.0
+
 if not df_db.empty and len(df_db['تاريخ_يومي_مختصر'].unique()) > 1:
     daily_summary = df_db.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum() / 60
-    # حذف اليوم الحالي من الحساب للحصول على متوسط الأيام السابقة الصافي
     previous_days = daily_summary.drop(index=today_str, errors='ignore')
     avg_previous_hours = round(previous_days.mean(), 1) if not previous_days.empty else 0.0
     delta_performance = round(total_today_hours - avg_previous_hours, 1)
@@ -105,7 +110,7 @@ with col_p1:
     st.caption(f"التقدم نحو الهدف اليومي (ساعتين): {progress_percent}%")
     st.progress(progress_percent / 100)
 with col_p2:
-    st.metric("إنجاز اليوم الفعلي", f"{total_today_hours} ساعة", delta=f"{delta_performance}_عن المعتاد" if delta_performance != total_today_hours else "أول نشاط")
+    st.metric("إنجاز اليوم الفعلي", f"{total_today_hours} ساعة", delta=f"{delta_performance} عن المعتاد" if delta_performance != total_today_hours else "أول نشاط")
 with col_p3:
     st.metric("متوسط إنجازك اليومي السابق", f"{avg_previous_hours} ساعة")
 
@@ -117,32 +122,28 @@ st.markdown("---")
 st.subheader("🧱 مخطط الالتزام السنوي (GitHub Activity Heatmap)")
 
 if not df_db.empty and df_db['تاريخ_صحيح'].notna().any():
-    # بناء مصفوفة لآخر 30 أسبوعاً كمحاكاة لشكل جيت هاب لكي يظهر بشكل رائع ومتناسق مع شاشات الهواتف والكمبيوتر
     df_heatmap = df_db.dropna(subset=['تاريخ_صحيح']).copy()
     df_heatmap['الأسبوع_السنوي'] = df_heatmap['تاريخ_صحيح'].dt.isocalendar().week
-    df_heatmap['اليوم_رقم'] = df_heatmap['تاريخ_صحيح'].dt.dayofweek # 0=الاثنين, 6=الأحد
+    df_heatmap['اليوم_رقم'] = df_heatmap['تاريخ_صحيح'].dt.dayofweek
     
-    # تجميع البيانات حسب الأسبوع واليوم
     heatmap_data = df_heatmap.groupby(['الأسبوع_السنوي', 'اليوم_رقم'])['المدة_بالدقائق'].sum().unstack(fill_value=0) / 60
     
-    # إعادة ترتيب الأيام لتظهر بشكل مألوف (من الاثنين إلى الأحد)
     days_names = ['الاثنين (Mon)', 'الثلاثاء (Tue)', 'الأربعاء (Wed)', 'الخميس (Thu)', 'الجمعة (Fri)', 'السبت (Sat)', 'الأحد (Sun)']
     for i in range(7):
         if i not in heatmap_data.columns:
             heatmap_data[i] = 0.0
     heatmap_data = heatmap_data.reindex(columns=range(7))
     
-    # رسم الـ Heatmap باستخدام Plotly
     fig_heatmap = go.Figure(data=go.Heatmap(
         z=heatmap_data.values.T,
         x=[f"أسبوع {w}" for w in heatmap_data.index],
         y=days_names,
         colorscale=[
-            [0.0, '#ebedf0'],      # رمادي فاتح جداً (بدون نشاط - مثل جيت هاب)
-            [0.1, '#9be9a8'],      # أخضر فاتح
-            [0.4, '#40c463'],      # أخضر متوسط
-            [0.7, '#30a14e'],      # أخضر غامق
-            [1.0, '#216e39']       # أخضر داكن جداً (أعلى نشاط)
+            [0.0, '#ebedf0'],
+            [0.1, '#9be9a8'],
+            [0.4, '#40c463'],
+            [0.7, '#30a14e'],
+            [1.0, '#216e39']
         ],
         showscale=True,
         colorbar=dict(title="ساعات الإنجاز", thickness=15)
@@ -167,21 +168,16 @@ st.subheader("📥 تسجيل نشاط جديد")
 
 auto_time = st.toggle("التسجيل التلقائي بالوقت والتاريخ الحالي فوراً ⚡", value=True)
 
-# 💡 ميزة مرنة: جلب الأنشطة الفريدة المسجلة سابقاً في قاعدة البيانات لكي لا تضيع الأنشطة المخصصة!
 default_activities = ["النادي 🏋️‍♂️", "الدراسة 📚", "العمل 💼"]
 if not df_db.empty:
     existing_activities = df_db['النشاط'].dropna().unique().tolist()
-    # دمج القائمتين وحذف التكرار
     activities_list = list(set(default_activities + existing_activities))
 else:
     activities_list = default_activities
 
 activities_list.append("➕ إضافة نشاط مخصص...")
-
-# استخراج إعدادات الوقت الافتراضية
 months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
-# تصميم الحقول التفاعلية
 if auto_time:
     c1, c2 = st.columns(2)
     with c1:
@@ -191,7 +187,6 @@ if auto_time:
     with c2:
         duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
     
-    # المتغيرات التلقائية
     target_date = now.date()
     target_time = now.time()
 else:
@@ -203,15 +198,11 @@ else:
     with c2:
         duration_hours = st.number_input("المدة (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
     with c3:
-        # 📅 تعديل الميزة: إضافة التاريخ على شكل جدول تقويم كامل
         target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
     with c4:
-        # ⌚ تعديل الميزة: إضافة الوقت على شكل واجهة ساعة ذكية
         target_time = st.time_input("اختر وقت النشاط (ساعة/دقيقة) ⌚", value=now.time())
 
-# زر الحفظ والمعالجة للبيانات المدخلة
 if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_container_width=True, type="primary"):
-    # إذا اختار نشاط مخصص، نتحقق من تعبئته
     if selected_activity == "➕ إضافة نشاط مخصص...":
         if 'custom_activity' in locals() and custom_activity.strip() != "":
             final_activity = custom_activity.strip()
@@ -221,7 +212,6 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     else:
         final_activity = selected_activity
 
-    # تفكيك التاريخ والوقت المستهدفين ليتناسبوا مع هيكل الـ Google Sheet بدقة
     combined_datetime = datetime.datetime.combine(target_date, target_time)
     
     exact_timestamp = combined_datetime.strftime('%Y-%m-%d %H:%M:%S')
@@ -229,7 +219,7 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     saved_month = months_list[combined_datetime.month - 1]
     saved_week = int(combined_datetime.isocalendar().week)
     saved_day = combined_datetime.strftime('%A')
-    saved_hour = combined_datetime.strftime('%H:00') # تقريب لأقرب ساعة للحفاظ على نمط البيانات القديم
+    saved_hour = combined_datetime.strftime('%H:00')
     
     unique_id = int(datetime.datetime.now().timestamp() * 1000)
     duration_minutes = int(duration_hours * 60)
@@ -253,12 +243,10 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     st.rerun()
 
 # ==========================================
-# 4. عرض السجل العام مع التحليلات والحذف
+# 4. عرض السجل العام مع الحذف والتصدير
 # ==========================================
 if not df_db.empty:
     st.markdown("---")
-    
-    # عرض رسم بياني دائري لتوزيع الوقت الإجمالي الحالي
     st.subheader("📊 توزيع نسب الأنشطة الكلية")
     fig_pie = px.pie(df_db, names='النشاط', values='المدة_بالدقائق', hole=0.4,
                      color_discrete_sequence=px.colors.qualitative.Set2)
