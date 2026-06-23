@@ -13,98 +13,58 @@ SCOPES = [
 
 @st.cache_resource
 def get_sheet():
-
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=SCOPES
     )
-
     client = gspread.authorize(creds)
-
     sheet_name = st.secrets["google"]["sheet_name"]
-
     spreadsheet = client.open(sheet_name)
-
     return spreadsheet.sheet1
 
 sheet = get_sheet()
 
-
-if len(sheet.get_all_values()) == 0:
-
-    sheet.append_row([
-        'ID',
-        'التاريخ',
-        'السنة',
-        'الشهر',
-        'الأسبوع',
-        'اليوم',
-        'الساعة',
-        'النشاط'
-    ])
+# تحسين 1: التحقق من وجود العناوين دون الحاجة لقراءة كل القيم وتسريع التشغيل الأول
+try:
+    # نقرأ السطر الأول فقط للتأكد من وجود العناوين لتقليل استهلاك الـ API
+    first_row = sheet.row_values(1)
+    if not first_row:
+        sheet.append_row(['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
+except Exception as e:
+    st.error(f"خطأ في الاتصال الأولي بقاعدة البيانات: {e}")
 
 # إعدادات الصفحة
 st.set_page_config(page_title="متابع الأنشطة اليومية المطور", layout="wide")
 st.title("📊 نظام متابعة وإحصائيات الأنشطة اليومية")
 
 
-
-# دالة لتحميل البيانات المخزنة أو إنشاء ملف جديد إذا لم يوجد
+# تحسين 2: استخدام st.cache_data لقراءة البيانات لتسريع التطبيق وحمايته من الـ Rate Limit
+@st.cache_data(ttl=600)  # يتم تحديث الكاش تلقائياً كل 10 دقائق أو عند الإضافة والحذف يدوياً
 def load_data():
-
     try:
-
         records = sheet.get_all_records()
-
         if len(records) == 0:
-
-            return pd.DataFrame(
-                columns=[
-                    'ID',
-                    'التاريخ',
-                    'السنة',
-                    'الشهر',
-                    'الأسبوع',
-                    'اليوم',
-                    'الساعة',
-                    'النشاط'
-                ]
-            )
-
+            return pd.DataFrame(columns=['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
         return pd.DataFrame(records)
-
-        
-
     except Exception as e:
-
         st.error(f"خطأ أثناء قراءة Google Sheet: {e}")
-
-        return pd.DataFrame(
-            columns=[
-                'ID',
-                'التاريخ',
-                'السنة',
-                'الشهر',
-                'الأسبوع',
-                'اليوم',
-                'الساعة',
-                'النشاط'
-            ]
-        )
-
+        return pd.DataFrame(columns=['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
 
 
 def save_data(df):
-
-    sheet.clear()
-
-    set_with_dataframe(
-        sheet,
-        df,
-        include_index=False,
-        include_column_header=True,
-        resize=True
-    )
+    try:
+        sheet.clear()
+        set_with_dataframe(
+            sheet,
+            df,
+            include_index=False,
+            include_column_header=True,
+            resize=True
+        )
+        # تحسين 2 (تابع): مسح الكاش بعد الحفظ لتظهر البيانات الجديدة مباشرة
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"حدث خطأ أثناء حفظ البيانات: {e}")
 
 # تحميل البيانات في الجلسة
 if 'db' not in st.session_state:
@@ -121,7 +81,16 @@ if not df_db.empty:
     now = datetime.datetime.now()
     current_year = now.year
     current_month = now.strftime('%B')
-    current_week = now.isocalendar().week
+    
+    # تحسين 3: التحقق من صحة البيانات (Data Validation) لمنع الأخطاء أثناء الحسابات
+    try:
+        # التأكد من تحويل الأعمدة لنوع البيانات الصحيح لتجنب أخطاء الحسابات
+        df_db['السنة'] = pd.to_numeric(df_db['السنة'], errors='coerce')
+        df_db['الأسبوع'] = pd.to_numeric(df_db['الأسبوع'], errors='coerce')
+        current_week = int(now.isocalendar().week)
+    except Exception as e:
+        st.warning("تنبيه: تم رصد بعض البيانات غير المتوافقة في الجداول ويجري التعامل معها.")
+        current_week = now.isocalendar().week
 
     # حساب العدادات
     col1, col2, col3 = st.columns(3)
@@ -193,22 +162,22 @@ if st.button("➕ تسجيل النشاط وحفظه", use_container_width=True)
     month_num = months_list.index(selected_month) + 1
     try:
         approx_date = datetime.datetime(selected_year, month_num, 1)
-        week_num = approx_date.isocalendar().week
+        week_num = int(approx_date.isocalendar().week)
     except:
-        week_num = datetime.datetime.now().isocalendar().week
+        week_num = int(datetime.datetime.now().isocalendar().week)
     
-    # توليد معرف فريد يعتمد على الوقت الحالي
     unique_id = int(datetime.datetime.now().timestamp() * 1000)
     
+    # تحسين 3 (تابع): التحقق من صحة المدخلات وضمان القيمة الصحيحة للأنواع قبل الإرسال لـ Excel
     new_row = {
         'ID': unique_id,
         'التاريخ': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'السنة': selected_year,
-        'الشهر': selected_month,
-        'الأسبوع': week_num,
-        'اليوم': selected_day,
-        'الساعة': selected_hour,
-        'النشاط': selected_activity
+        'السنة': int(selected_year),
+        'الشهر': str(selected_month),
+        'الأسبوع': int(week_num),
+        'اليوم': str(selected_day),
+        'الساعة': str(selected_hour),
+        'النشاط': str(selected_activity)
     }
     
     df_db = pd.concat([df_db, pd.DataFrame([new_row])], ignore_index=True)
@@ -224,12 +193,9 @@ if not df_db.empty:
     st.markdown("---")
     st.subheader("📋 إدارة وحذف الأنشطة المدخلة")
     
-    # تحضير جدول تفاعلي يحتوي على خانة اختيار للحذف (Delete)
-    # نقوم بعمل نسخة للعرض فقط بدون إظهار عمود الـ ID الداخلي للمستخدم
     display_df = df_db.copy()
     display_df['حذف؟'] = False
     
-    # إعادة الترتيب ليظهر عمود الحذف كأول عمود تفاعلي
     cols = ['حذف؟'] + [col for col in display_df.columns if col not in ['حذف؟', 'ID']]
     display_df = display_df[cols]
     
@@ -240,18 +206,16 @@ if not df_db.empty:
         column_config={
             "حذف؟": st.column_config.CheckboxColumn("إجراء الحذف", help="حدد الخانة لحذف هذا السطر", default=False)
         },
-        disabled=[col for col in display_df.columns if col != 'حذف؟'], # منع تعديل باقي البيانات
+        disabled=[col for col in display_df.columns if col != 'حذف؟'],
         hide_index=True,
         use_container_width=True,
         key="data_editor_delete"
     )
     
-    # زر تفعيل الحذف للأسطر المحددة
     indices_to_delete = edited_display[edited_display['حذف؟'] == True].index
     
     if len(indices_to_delete) > 0:
         if st.button("🗑️ تأكيد حذف الأنشطة المحددة", type="primary"):
-            # تحديد وحذف الأسطر المقابلة في قاعدة البيانات الأصلية
             df_db = df_db.drop(indices_to_delete).reset_index(drop=True)
             save_data(df_db)
             st.session_state.db = df_db
@@ -259,10 +223,8 @@ if not df_db.empty:
             st.rerun()
 
     st.markdown("---")
-    # زر تصدير ملف إكسل منسق جاهز ومصلح من اليمين لليسار تلقائياً
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        # تصدير البيانات بدون عمود الـ ID
         df_db.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
         workbook  = writer.book
         worksheet = writer.sheets['الأنشطة اليومية']
@@ -280,33 +242,12 @@ if not df_db.empty:
     st.markdown("---")
 
     if st.button("🚨 مسح السجل بالكامل والبدء من جديد"):
-
         sheet.clear()
-
-        sheet.append_row([
-            'ID',
-            'التاريخ',
-            'السنة',
-            'الشهر',
-            'الأسبوع',
-            'اليوم',
-            'الساعة',
-            'النشاط'
-        ])
-
-        st.session_state.db = pd.DataFrame(
-            columns=[
-                'ID',
-                'التاريخ',
-                'السنة',
-                'الشهر',
-                'الأسبوع',
-                'اليوم',
-                'الساعة',
-                'النشاط'
-            ]
-        )
-
+        sheet.append_row(['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
+        
+        # تحسين 2 (تابع): تنظيف الكاش عند تصفير السجل تماماً
+        st.cache_data.clear()
+        
+        st.session_state.db = pd.DataFrame(columns=['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط'])
         st.success("تم مسح البيانات بالكامل!")
-
         st.rerun()
