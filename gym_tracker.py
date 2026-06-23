@@ -29,7 +29,7 @@ def get_sheet():
 
 sheet = get_sheet()
 
-# الأعمدة الأساسية الشاملة للميزة الجديدة
+# الأعمدة الأساسية والرسمية المعتمدة فقط في الـ Google Sheet
 COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق']
 
 try:
@@ -49,19 +49,24 @@ def load_data():
             return pd.DataFrame(columns=COLUMNS)
         df = pd.DataFrame(records)
         
-        # 🛡️ حل حماية إضافي: إذا كان العمود غير موجود في شيت جوجل القديم، يتم إنشاؤه برمجياً فوراً
+        # حماية إضافية: التأكد من وجود الأعمدة المطلوبة وتصفية أي أعمدة زائدة قديمة
         if 'المدة_بالدقائق' not in df.columns:
             df['المدة_بالدقائق'] = 60
             
-        return df
+        # إرجاع الأعمدة الأساسية فقط لضمان نظافة الشيت
+        existing_cols = [c for c in COLUMNS if c in df.columns]
+        return df[existing_cols]
     except Exception as e:
         st.error(f"خطأ أثناء قراءة Google Sheet: {e}")
         return pd.DataFrame(columns=COLUMNS)
 
 def save_data(df):
     try:
+        # 🛡️ الحل: تصفية الـ DataFrame لضمان عدم إرسال أي أعمدة مؤقتة أو حسابية لـ Google Sheets
+        clean_df = df[[c for c in COLUMNS if c in df.columns]].copy()
+        
         sheet.clear()
-        set_with_dataframe(sheet, df, include_index=False, include_column_header=True, resize=True)
+        set_with_dataframe(sheet, clean_df, include_index=False, include_column_header=True, resize=True)
         st.cache_data.clear()
     except Exception as e:
         st.error(f"حدث خطأ أثناء حفظ البيانات: {e}")
@@ -71,32 +76,33 @@ if 'db' not in st.session_state:
 
 df_db = st.session_state.db
 
-# تجهيز التواريخ للإحصائيات
+# تجهيز التواريخ للإحصائيات في الذاكرة المؤقتة (لا تُحفظ بالشيت)
 now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
 
 if not df_db.empty:
-    df_db['تاريخ_صحيح'] = pd.to_datetime(df_db['التاريخ'], errors='coerce')
-    df_db['تاريخ_يومي_مختصر'] = df_db['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
-    df_db['المدة_بالدقائق'] = pd.to_numeric(df_db['المدة_بالدقائق'], errors='coerce').fillna(0)
+    df_db_calc = df_db.copy()
+    df_db_calc['تاريخ_صحيح'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
+    df_db_calc['تاريخ_يومي_مختصر'] = df_db_calc['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
+    df_db_calc['المدة_بالدقائق'] = pd.to_numeric(df_db_calc['المدة_بالدقائق'], errors='coerce').fillna(0)
 else:
-    df_db['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
+    df_db_calc = df_db.copy()
+    df_db_calc['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
 
 # ==========================================
 # 1. شريط الإنجاز اليومي ومقارنة الأداء
 # ==========================================
 st.subheader("🎯 مؤشر الإنجاز ومقارنة الأداء")
 
-today_activities = df_db[df_db['تاريخ_يومي_مختصر'] == today_str] if not df_db.empty else pd.DataFrame()
+today_activities = df_db_calc[df_db_calc['تاريخ_يومي_مختصر'] == today_str] if not df_db_calc.empty else pd.DataFrame()
 
-# تأمين الحساب حتى لو لم تكن هناك بيانات للعمود بعد
-if not today_activities.empty and 'المدة_بالدقائق' in today_activities.columns:
+if not today_activities.empty:
     total_today_hours = round(today_activities['المدة_بالدقائق'].sum() / 60, 1)
 else:
     total_today_hours = 0.0
 
-if not df_db.empty and len(df_db['تاريخ_يومي_مختصر'].unique()) > 1:
-    daily_summary = df_db.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum() / 60
+if not df_db_calc.empty and len(df_db_calc['تاريخ_يومي_مختصر'].unique()) > 1:
+    daily_summary = df_db_calc.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum() / 60
     previous_days = daily_summary.drop(index=today_str, errors='ignore')
     avg_previous_hours = round(previous_days.mean(), 1) if not previous_days.empty else 0.0
     delta_performance = round(total_today_hours - avg_previous_hours, 1)
@@ -121,8 +127,8 @@ st.markdown("---")
 # ==========================================
 st.subheader("🧱 مخطط الالتزام السنوي (GitHub Activity Heatmap)")
 
-if not df_db.empty and df_db['تاريخ_صحيح'].notna().any():
-    df_heatmap = df_db.dropna(subset=['تاريخ_صحيح']).copy()
+if not df_db_calc.empty and df_db_calc['تاريخ_صحيح'].notna().any():
+    df_heatmap = df_db_calc.dropna(subset=['تاريخ_صحيح']).copy()
     df_heatmap['الأسبوع_السنوي'] = df_heatmap['تاريخ_صحيح'].dt.isocalendar().week
     df_heatmap['اليوم_رقم'] = df_heatmap['تاريخ_صحيح'].dt.dayofweek
     
@@ -284,7 +290,9 @@ if not df_db.empty:
     st.markdown("---")
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        df_db.drop(columns=['ID', 'تاريخ_صحيح', 'تاريخ_يومي_مختصر'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
+        # التأكد من تصدير الأعمدة النظيفة فقط في ملف الـ Excel المنسق
+        clean_excel_df = df_db[[c for c in COLUMNS if c in df_db.columns]].copy()
+        clean_excel_df.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
         workbook  = writer.book
         worksheet = writer.sheets['الأنشطة اليومية']
         worksheet.views.sheetView[0].showGridLines = True
@@ -304,5 +312,5 @@ if not df_db.empty:
         sheet.append_row(COLUMNS)
         st.cache_data.clear()
         st.session_state.db = pd.DataFrame(columns=COLUMNS)
-        st.success("تم تصفير قاعدة البيانات بالكامل!")
+        st.success("تم تصفير قاعدة البيانات بالكامل بنجاح ونظافة!")
         st.rerun()
