@@ -117,8 +117,14 @@ st.markdown("---")
 # ==========================================
 # 2. الرسوم البيانية (مخطط GitHub الفردي + المخطط الدائري)
 # ==========================================
-col_graph1, col_graph2 = st.columns([2, 1])
+is_mobile = st.session_state.get("mobile", False)
 
+if st.sidebar.checkbox("وضع الهاتف", value=True):
+    col_graph1 = st.container()
+    col_graph2 = st.container()
+else:
+    col_graph1, col_graph2 = st.columns([2,1])
+    
 with col_graph1:
     st.subheader("🧱 مخطط الالتزام السنوي (GitHub Contributions Grid)")
     
@@ -133,7 +139,7 @@ with col_graph1:
     df_year_grid['الشهر_رقم'] = df_year_grid['تاريخ_صحيح'].dt.month
 
     github_day_order = [6, 0, 1, 2, 3, 4, 5] 
-    days_names = ['الأحد (Sun)', 'الاثنين (Mon)', 'الثلاثاء (Tue)', 'الأربعاء (Wed)', 'الخميس (Thu)', 'الجمعة (Fri)', 'السبت (Sat)']
+    days_names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
     df_year_grid.loc[(df_year_grid['الشهر_رقم'] == 1) & (df_year_grid['الأسبوع_السنوي'] >= 52), 'الأسبوع_السنوي'] = 0
     df_year_grid.loc[(df_year_grid['الشهر_رقم'] == 12) & (df_year_grid['الأسبوع_السنوي'] == 1), 'الأسبوع_السنوي'] = 53
