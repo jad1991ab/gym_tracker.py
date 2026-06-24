@@ -3,8 +3,8 @@ import pandas as pd
 import gspread
 import datetime
 import io
-import plotly.express as px
 import plotly.graph_objects as go
+import streamlit.components.v1 as components
 from google.oauth2.service_account import Credentials
 from gspread_dataframe import set_with_dataframe
 
@@ -29,7 +29,7 @@ def get_sheet():
 
 sheet = get_sheet()
 
-# الأعمدة الأساسية والرسمية المعتمدة فقط في الـ Google Sheet
+# الأعمدة الأساسية المعتمدة فقط في الـ Google Sheet
 COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق']
 
 try:
@@ -39,7 +39,7 @@ try:
 except Exception as e:
     st.error(f"خطأ في الاتصال الأولي بقاعدة البيانات: {e}")
 
-st.title("🟢 نظام متابعة الأنشطة المطور (إحصائيات GitHub المتقدمة)")
+st.title("🟢 نظام متابعة الأنشطة المطور (مخطط الالتزام السنوي الكامل)")
 
 @st.cache_data(ttl=600)
 def load_data():
@@ -48,12 +48,8 @@ def load_data():
         if len(records) == 0:
             return pd.DataFrame(columns=COLUMNS)
         df = pd.DataFrame(records)
-        
-        # حماية إضافية: التأكد من وجود الأعمدة المطلوبة وتصفية أي أعمدة زائدة قديمة
         if 'المدة_بالدقائق' not in df.columns:
             df['المدة_بالدقائق'] = 60
-            
-        # إرجاع الأعمدة الأساسية فقط لضمان نظافة الشيت
         existing_cols = [c for c in COLUMNS if c in df.columns]
         return df[existing_cols]
     except Exception as e:
@@ -62,9 +58,7 @@ def load_data():
 
 def save_data(df):
     try:
-        # 🛡️ الحل: تصفية الـ DataFrame لضمان عدم إرسال أي أعمدة مؤقتة أو حسابية لـ Google Sheets
         clean_df = df[[c for c in COLUMNS if c in df.columns]].copy()
-        
         sheet.clear()
         set_with_dataframe(sheet, clean_df, include_index=False, include_column_header=True, resize=True)
         st.cache_data.clear()
@@ -76,9 +70,10 @@ if 'db' not in st.session_state:
 
 df_db = st.session_state.db
 
-# تجهيز التواريخ للإحصائيات في الذاكرة المؤقتة (لا تُحفظ بالشيت)
+# تجهيز التواريخ للإحصائيات
 now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
+current_year = now.year
 
 if not df_db.empty:
     df_db_calc = df_db.copy()
@@ -95,11 +90,7 @@ else:
 st.subheader("🎯 مؤشر الإنجاز ومقارنة الأداء")
 
 today_activities = df_db_calc[df_db_calc['تاريخ_يومي_مختصر'] == today_str] if not df_db_calc.empty else pd.DataFrame()
-
-if not today_activities.empty:
-    total_today_hours = round(today_activities['المدة_بالدقائق'].sum() / 60, 1)
-else:
-    total_today_hours = 0.0
+total_today_hours = round(today_activities['المدة_بالدقائق'].sum() / 60, 1) if not today_activities.empty else 0.0
 
 if not df_db_calc.empty and len(df_db_calc['تاريخ_يومي_مختصر'].unique()) > 1:
     daily_summary = df_db_calc.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum() / 60
@@ -123,47 +114,100 @@ with col_p3:
 st.markdown("---")
 
 # ==========================================
-# 2. مخطط الالتزام السنوي التفاعلي (GitHub Heatmap)
+# 2. مخطط الالتزام السنوي الكامل (GitHub Heatmap)
 # ==========================================
-st.subheader("🧱 مخطط الالتزام السنوي (GitHub Activity Heatmap)")
+st.subheader("🧱 مخطط الالتزام السنوي (GitHub Contributions Grid)")
 
-if not df_db_calc.empty and df_db_calc['تاريخ_صحيح'].notna().any():
-    df_heatmap = df_db_calc.dropna(subset=['تاريخ_صحيح']).copy()
-    df_heatmap['الأسبوع_السنوي'] = df_heatmap['تاريخ_صحيح'].dt.isocalendar().week
-    df_heatmap['اليوم_رقم'] = df_heatmap['تاريخ_صحيح'].dt.dayofweek
-    
-    heatmap_data = df_heatmap.groupby(['الأسبوع_السنوي', 'اليوم_رقم'])['المدة_بالدقائق'].sum().unstack(fill_value=0) / 60
-    
-    days_names = ['الاثنين (Mon)', 'الثلاثاء (Tue)', 'الأربعاء (Wed)', 'الخميس (Thu)', 'الجمعة (Fri)', 'السبت (Sat)', 'الأحد (Sun)']
-    for i in range(7):
-        if i not in heatmap_data.columns:
-            heatmap_data[i] = 0.0
-    heatmap_data = heatmap_data.reindex(columns=range(7))
-    
-    fig_heatmap = go.Figure(data=go.Heatmap(
-        z=heatmap_data.values.T,
-        x=[f"أسبوع {w}" for w in heatmap_data.index],
-        y=days_names,
-        colorscale=[
-            [0.0, '#ebedf0'],
-            [0.1, '#9be9a8'],
-            [0.4, '#40c463'],
-            [0.7, '#30a14e'],
-            [1.0, '#216e39']
-        ],
-        showscale=True,
-        colorbar=dict(title="ساعات الإنجاز", thickness=15)
-    ))
-    
-    fig_heatmap.update_layout(
-        height=280,
-        margin=dict(t=10, b=10, l=10, r=10),
-        xaxis=dict(showgrid=False, ticks=""),
-        yaxis=dict(showgrid=False, ticks="")
-    )
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+# إنشاء خريطة كاملة للسنة الحالية (365 يوماً) لضمان ظهور كافة الأشهر والأسابيع بشكل متصل كـ GitHub
+start_date = datetime.date(current_year, 1, 1)
+end_date = datetime.date(current_year, 12, 31)
+all_days = pd.date_range(start=start_date, end=end_date)
+
+df_year_grid = pd.DataFrame({'تاريخ_صحيح': all_days})
+df_year_grid['تاريخ_يومي_مختصر'] = df_year_grid['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
+df_year_grid['الأسبوع_السنوي'] = df_year_grid['تاريخ_صحيح'].dt.isocalendar().week
+df_year_grid['اليوم_رقم'] = df_year_grid['تاريخ_صحيح'].dt.dayofweek # 0=الاثنين, 6=الأحد
+df_year_grid['الشهر_رقم'] = df_year_grid['تاريخ_صحيح'].dt.month
+
+# إصلاح مشكلة الأسبوع 52/53 في بداية ونهاية السنة لضمان الترتيب المتسلسل للمربعات
+df_year_grid.loc[(df_year_grid['الشهر_رقم'] == 1) & (df_year_grid['الأسبوع_السنوي'] >= 52), 'الأسبوع_السنوي'] = 0
+df_year_grid.loc[(df_year_grid['الشهر_رقم'] == 12) & (df_year_grid['الأسبوع_السنوي'] == 1), 'الأسبوع_السنوي'] = 53
+
+# دمج ساعات الإنجاز الفعلية مع مصفوفة السنة الكاملة
+if not df_db_calc.empty:
+    user_summary = df_db_calc.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum().reset_index()
+    user_summary['الساعات'] = user_summary['المدة_بالدقائق'] / 60
+    df_year_grid = pd.merge(df_year_grid, user_summary[['تاريخ_يومي_مختصر', 'الساعات']], on='تاريخ_يومي_مختصر', how='left').fillna(0)
 else:
-    st.info("سيظهر مخطط مربعات الالتزام (GitHub Heatmap) هنا بمجرد تسجيل الأنشطة وتوفر البيانات.")
+    df_year_grid['الساعات'] = 0.0
+
+# إنشاء المصفوفة الثنائية للرسم (الأسابيع في المحور الأفقي، الأيام في المحور الرأسي)
+weeks_indices = sorted(df_year_grid['الأسبوع_السنوي'].unique())
+z_matrix = []
+text_matrix = []
+
+days_names = ['الاثنين (Mon)', 'الثلاثاء (Tue)', 'الأربعاء (Wed)', 'الخميس (Thu)', 'الجمعة (Fri)', 'السبت (Sat)', 'الأحد (Sun)']
+
+for d in range(7):
+    row_z = []
+    row_text = []
+    for w in weeks_indices:
+        day_data = df_year_grid[(df_year_grid['الأسبوع_السنوي'] == w) & (df_year_grid['اليوم_رقم'] == d)]
+        if not day_data.empty:
+            val = day_data['الساعات'].values[0]
+            date_lbl = day_data['تاريخ_يومي_مختصر'].values[0]
+            row_z.append(val)
+            row_text.append(f"التاريخ: {date_lbl}<br>الإنجاز: {val} ساعة")
+        else:
+            row_z.append(None) # مربعات فارغة للأيام التي لا تنتمي للسنة الحالية في أطراف الأسابيع
+            row_text.append("")
+    z_matrix.append(row_z)
+    text_matrix.append(row_text)
+
+# تحديد مواقع أسماء الأشهر لتظهر في الأعلى بشكل متناسق فوق الأسابيع الخاصة بها
+month_labels = []
+month_positions = []
+for m in range(1, 13):
+    m_data = df_year_grid[df_year_grid['الشهر_رقم'] == m]
+    if not m_data.empty:
+        mid_week = m_data['الأسبوع_السنوي'].median()
+        month_name = datetime.date(current_year, m, 1).strftime('%b')
+        month_labels.append(month_name)
+        month_positions.append(f"أسبوع {int(mid_week)}")
+
+fig_heatmap = go.Figure(data=go.Heatmap(
+    z=z_matrix,
+    x=[f"أسبوع {w}" for w in weeks_indices],
+    y=days_names,
+    text=text_matrix,
+    hoverinfo='text',
+    xgap=3,
+    ygap=3,
+    colorscale=[
+        [0.0, '#ebedf0'],      # رمادي (بدون نشاط)
+        [0.01, '#9be9a8'],     # أخضر خفيف
+        [0.3, '#40c463'],      # أخضر متوسط
+        [0.6, '#30a14e'],      # أخضر غامق
+        [1.0, '#216e39']       # أخضر داكن جداً
+    ],
+    showscale=True,
+    colorbar=dict(title="ساعات الإنجاز", thickness=15)
+))
+
+fig_heatmap.update_layout(
+    height=290,
+    margin=dict(t=30, b=10, l=10, r=10),
+    xaxis=dict(
+        showgrid=False, 
+        ticks="", 
+        tickmode='array',
+        tickvals=month_positions,
+        ticktext=month_labels,
+        side='top'
+    ),
+    yaxis=dict(showgrid=False, ticks="", autorange="reverse")
+)
+st.plotly_chart(fig_heatmap, use_container_width=True)
 
 st.markdown("---")
 
@@ -184,6 +228,11 @@ else:
 activities_list.append("➕ إضافة نشاط مخصص...")
 months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
+# تعريف القيم الافتراضية
+target_date = now.date()
+chosen_hour = now.hour
+chosen_minute = now.minute
+
 if auto_time:
     c1, c2 = st.columns(2)
     with c1:
@@ -192,22 +241,49 @@ if auto_time:
             custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
     with c2:
         duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
-    
-    target_date = now.date()
-    target_time = now.time()
 else:
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3 = st.columns([2, 1, 2])
     with c1:
         selected_activity = st.selectbox("النشاط", activities_list)
         if selected_activity == "➕ إضافة نشاط مخصص...":
             custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
-    with c2:
         duration_hours = st.number_input("المدة (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
-    with c3:
+    with c2:
         target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
-    with c4:
-        target_time = st.time_input("اختر وقت النشاط (ساعة/دقيقة) ⌚", value=now.time())
+    with c3:
+        st.markdown("<label style='font-size:14px;'>اضبط الوقت بالساعة الدائرية ⌚</label>", unsafe_allow_html=True)
+        
+        # ⌚ ساعة دائرية تفاعلية مدمجة عبر مكون ويب (HTML/JS HTML5 Clock Picker)
+        clock_html = f"""
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif;">
+            <input type="time" id="analog_picker" value="{now.strftime('%H:%M')}" 
+                   style="font-size: 20px; padding: 8px; border-radius: 8px; border: 1px solid #ccc; text-align: center; width: 160px; background: #fff; cursor: pointer;">
+            <p style="font-size:11px; color:#666; margin-top:5px;">اضغط على الصندوق لتفتح لك الساعة الدائرية مباشرة</p>
+        </div>
+        <script>
+            var picker = document.getElementById('analog_picker');
+            picker.addEventListener('input', function() {{
+                window.parent.postMessage({{type: 'streamlit:setComponentValue', value: picker.value}}, '*');
+            }});
+            // إرسال القيمة البدئية تلقائياً
+            setTimeout(function() {{
+                window.parent.postMessage({{type: 'streamlit:setComponentValue', value: picker.value}}, '*');
+            }}, 500);
+        </script>
+        """
+        # جلب الوقت المختار من مكوّن الساعة التفاعلية
+        clock_return = components.html(clock_html, height=100)
+        
+        # تصفية وإسناد الوقت المختار
+        if clock_return:
+            try:
+                t_parts = str(clock_return).split(":")
+                chosen_hour = int(t_parts[0])
+                chosen_minute = int(t_parts[1])
+            except:
+                pass
 
+# زر الحفظ والمعالجة
 if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_container_width=True, type="primary"):
     if selected_activity == "➕ إضافة نشاط مخصص...":
         if 'custom_activity' in locals() and custom_activity.strip() != "":
@@ -218,6 +294,11 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     else:
         final_activity = selected_activity
 
+    if auto_time:
+        target_time = now.time()
+    else:
+        target_time = datetime.time(chosen_hour, chosen_minute)
+
     combined_datetime = datetime.datetime.combine(target_date, target_time)
     
     exact_timestamp = combined_datetime.strftime('%Y-%m-%d %H:%M:%S')
@@ -225,7 +306,7 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     saved_month = months_list[combined_datetime.month - 1]
     saved_week = int(combined_datetime.isocalendar().week)
     saved_day = combined_datetime.strftime('%A')
-    saved_hour = combined_datetime.strftime('%H:00')
+    saved_hour = combined_datetime.strftime('%H:%M')
     
     unique_id = int(datetime.datetime.now().timestamp() * 1000)
     duration_minutes = int(duration_hours * 60)
@@ -252,12 +333,6 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
 # 4. عرض السجل العام مع الحذف والتصدير
 # ==========================================
 if not df_db.empty:
-    st.markdown("---")
-    st.subheader("📊 توزيع نسب الأنشطة الكلية")
-    fig_pie = px.pie(df_db, names='النشاط', values='المدة_بالدقائق', hole=0.4,
-                     color_discrete_sequence=px.colors.qualitative.Set2)
-    st.plotly_chart(fig_pie, use_container_width=True)
-    
     st.markdown("---")
     st.subheader("📋 سجل التحكم بالبيانات وحذف الأسطر")
     
@@ -290,7 +365,6 @@ if not df_db.empty:
     st.markdown("---")
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        # التأكد من تصدير الأعمدة النظيفة فقط في ملف الـ Excel المنسق
         clean_excel_df = df_db[[c for c in COLUMNS if c in df_db.columns]].copy()
         clean_excel_df.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
         workbook  = writer.book
@@ -312,5 +386,5 @@ if not df_db.empty:
         sheet.append_row(COLUMNS)
         st.cache_data.clear()
         st.session_state.db = pd.DataFrame(columns=COLUMNS)
-        st.success("تم تصفير قاعدة البيانات بالكامل بنجاح ونظافة!")
+        st.success("تم تصفير قاعدة البيانات بالكامل!")
         st.rerun()
