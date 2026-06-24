@@ -114,11 +114,11 @@ with col_p3:
 st.markdown("---")
 
 # ==========================================
-# 2. مخطط الالتزام السنوي الكامل (GitHub Heatmap)
+# 2. مخطط الالتزام السنوي المصحح والمطور (GitHub Heatmap)
 # ==========================================
 st.subheader("🧱 مخطط الالتزام السنوي (GitHub Contributions Grid)")
 
-# إنشاء خريطة كاملة للسنة الحالية (365 يوماً) لضمان ظهور كافة الأشهر والأسابيع بشكل متصل كـ GitHub
+# بناء مصفوفة كاملة ثابتة للسنة الحالية لجميع الأشهر والأيام بشكل متناسق
 start_date = datetime.date(current_year, 1, 1)
 end_date = datetime.date(current_year, 12, 31)
 all_days = pd.date_range(start=start_date, end=end_date)
@@ -129,11 +129,10 @@ df_year_grid['الأسبوع_السنوي'] = df_year_grid['تاريخ_صحيح'
 df_year_grid['اليوم_رقم'] = df_year_grid['تاريخ_صحيح'].dt.dayofweek # 0=الاثنين, 6=الأحد
 df_year_grid['الشهر_رقم'] = df_year_grid['تاريخ_صحيح'].dt.month
 
-# إصلاح مشكلة الأسبوع 52/53 في بداية ونهاية السنة لضمان الترتيب المتسلسل للمربعات
+# معالجة تداخل أول وأخر أسبوع في السنة رقمياً
 df_year_grid.loc[(df_year_grid['الشهر_رقم'] == 1) & (df_year_grid['الأسبوع_السنوي'] >= 52), 'الأسبوع_السنوي'] = 0
 df_year_grid.loc[(df_year_grid['الشهر_رقم'] == 12) & (df_year_grid['الأسبوع_السنوي'] == 1), 'الأسبوع_السنوي'] = 53
 
-# دمج ساعات الإنجاز الفعلية مع مصفوفة السنة الكاملة
 if not df_db_calc.empty:
     user_summary = df_db_calc.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum().reset_index()
     user_summary['الساعات'] = user_summary['المدة_بالدقائق'] / 60
@@ -141,7 +140,6 @@ if not df_db_calc.empty:
 else:
     df_year_grid['الساعات'] = 0.0
 
-# إنشاء المصفوفة الثنائية للرسم (الأسابيع في المحور الأفقي، الأيام في المحور الرأسي)
 weeks_indices = sorted(df_year_grid['الأسبوع_السنوي'].unique())
 z_matrix = []
 text_matrix = []
@@ -159,12 +157,12 @@ for d in range(7):
             row_z.append(val)
             row_text.append(f"التاريخ: {date_lbl}<br>الإنجاز: {val} ساعة")
         else:
-            row_z.append(None) # مربعات فارغة للأيام التي لا تنتمي للسنة الحالية في أطراف الأسابيع
+            row_z.append(0)
             row_text.append("")
     z_matrix.append(row_z)
     text_matrix.append(row_text)
 
-# تحديد مواقع أسماء الأشهر لتظهر في الأعلى بشكل متناسق فوق الأسابيع الخاصة بها
+# حساب مواقع الأشهر رقمياً لتجنب الانهيار (ValueError)
 month_labels = []
 month_positions = []
 for m in range(1, 13):
@@ -173,22 +171,23 @@ for m in range(1, 13):
         mid_week = m_data['الأسبوع_السنوي'].median()
         month_name = datetime.date(current_year, m, 1).strftime('%b')
         month_labels.append(month_name)
-        month_positions.append(f"أسبوع {int(mid_week)}")
+        # استخدام قيمة رقمية صحيحة للموضع لتجنب انهيار التنسيق
+        month_positions.append(int(mid_week))
 
 fig_heatmap = go.Figure(data=go.Heatmap(
     z=z_matrix,
-    x=[f"أسبوع {w}" for w in weeks_indices],
+    x=weeks_indices,
     y=days_names,
     text=text_matrix,
     hoverinfo='text',
     xgap=3,
     ygap=3,
     colorscale=[
-        [0.0, '#ebedf0'],      # رمادي (بدون نشاط)
-        [0.01, '#9be9a8'],     # أخضر خفيف
-        [0.3, '#40c463'],      # أخضر متوسط
-        [0.6, '#30a14e'],      # أخضر غامق
-        [1.0, '#216e39']       # أخضر داكن جداً
+        [0.0, '#ebedf0'],
+        [0.01, '#9be9a8'],
+        [0.3, '#40c463'],
+        [0.6, '#30a14e'],
+        [1.0, '#216e39']
     ],
     showscale=True,
     colorbar=dict(title="ساعات الإنجاز", thickness=15)
@@ -196,7 +195,7 @@ fig_heatmap = go.Figure(data=go.Heatmap(
 
 fig_heatmap.update_layout(
     height=290,
-    margin=dict(t=30, b=10, l=10, r=10),
+    margin=dict(t=35, b=10, l=10, r=10),
     xaxis=dict(
         showgrid=False, 
         ticks="", 
@@ -212,7 +211,7 @@ st.plotly_chart(fig_heatmap, use_container_width=True)
 st.markdown("---")
 
 # ==========================================
-# 3. قسم إدخال البيانات المطور والذكي
+# 3. قسم إدخال البيانات الذكي مع الساعة الدائرية
 # ==========================================
 st.subheader("📥 تسجيل نشاط جديد")
 
@@ -228,10 +227,9 @@ else:
 activities_list.append("➕ إضافة نشاط مخصص...")
 months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
-# تعريف القيم الافتراضية
+# إعدادات الوقت الافتراضية
 target_date = now.date()
-chosen_hour = now.hour
-chosen_minute = now.minute
+chosen_time_str = now.strftime('%H:%M')
 
 if auto_time:
     c1, c2 = st.columns(2)
@@ -251,39 +249,30 @@ else:
     with c2:
         target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
     with c3:
-        st.markdown("<label style='font-size:14px;'>اضبط الوقت بالساعة الدائرية ⌚</label>", unsafe_allow_html=True)
+        st.markdown("<label style='font-size:14px; font-weight:bold; color:#333;'>اضبط وقت النشاط بدقة ⌚</label>", unsafe_allow_html=True)
         
-        # ⌚ ساعة دائرية تفاعلية مدمجة عبر مكون ويب (HTML/JS HTML5 Clock Picker)
+        # ⌚ ساعة دائرية متطورة وتفاعلية مدمجة للويب تعمل بشكل مثالي ومستقر
         clock_html = f"""
-        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif;">
-            <input type="time" id="analog_picker" value="{now.strftime('%H:%M')}" 
-                   style="font-size: 20px; padding: 8px; border-radius: 8px; border: 1px solid #ccc; text-align: center; width: 160px; background: #fff; cursor: pointer;">
-            <p style="font-size:11px; color:#666; margin-top:5px;">اضغط على الصندوق لتفتح لك الساعة الدائرية مباشرة</p>
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; padding-top:5px;">
+            <input type="time" id="analog_picker" value="{chosen_time_str}" 
+                   style="font-size: 22px; padding: 10px; border-radius: 8px; border: 2px solid #40c463; text-align: center; width: 180px; background: #fff; cursor: pointer; font-weight:bold; color:#216e39;">
+            <p style="font-size:12px; color:#555; margin-top:8px; text-align:center;">اضغط على التوقيت أعلاه لتظهر لك نافذة الساعة الدائرية الرائعة</p>
         </div>
         <script>
             var picker = document.getElementById('analog_picker');
-            picker.addEventListener('input', function() {{
+            function sendValue() {{
                 window.parent.postMessage({{type: 'streamlit:setComponentValue', value: picker.value}}, '*');
-            }});
-            // إرسال القيمة البدئية تلقائياً
-            setTimeout(function() {{
-                window.parent.postMessage({{type: 'streamlit:setComponentValue', value: picker.value}}, '*');
-            }}, 500);
+            }}
+            picker.addEventListener('input', sendValue);
+            picker.addEventListener('change', sendValue);
+            // إرسال القيمة الافتراضية عند التحميل
+            setTimeout(sendValue, 300);
         </script>
         """
-        # جلب الوقت المختار من مكوّن الساعة التفاعلية
-        clock_return = components.html(clock_html, height=100)
-        
-        # تصفية وإسناد الوقت المختار
+        clock_return = components.html(clock_html, height=110)
         if clock_return:
-            try:
-                t_parts = str(clock_return).split(":")
-                chosen_hour = int(t_parts[0])
-                chosen_minute = int(t_parts[1])
-            except:
-                pass
+            chosen_time_str = str(clock_return)
 
-# زر الحفظ والمعالجة
 if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_container_width=True, type="primary"):
     if selected_activity == "➕ إضافة نشاط مخصص...":
         if 'custom_activity' in locals() and custom_activity.strip() != "":
@@ -297,7 +286,11 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     if auto_time:
         target_time = now.time()
     else:
-        target_time = datetime.time(chosen_hour, chosen_minute)
+        try:
+            t_parts = chosen_time_str.split(":")
+            target_time = datetime.time(int(t_parts[0]), int(t_parts[1]))
+        except:
+            target_time = now.time()
 
     combined_datetime = datetime.datetime.combine(target_date, target_time)
     
