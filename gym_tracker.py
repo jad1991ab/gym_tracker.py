@@ -115,14 +115,13 @@ with col_p3:
 st.markdown("---")
 
 # ==========================================
-# 2. الرسوم البيانية (مخطط GitHub الفردي + المخطط الدائري الجديد)
+# 2. الرسوم البيانية (مخطط GitHub الفردي + المخطط الدائري)
 # ==========================================
 col_graph1, col_graph2 = st.columns([2, 1])
 
 with col_graph1:
     st.subheader("🧱 مخطط الالتزام السنوي (GitHub Contributions Grid)")
     
-    # بناء مصفوفة السنة الكاملة
     start_date = datetime.date(current_year, 1, 1)
     end_date = datetime.date(current_year, 12, 31)
     all_days = pd.date_range(start=start_date, end=end_date)
@@ -193,21 +192,20 @@ with col_graph1:
 with col_graph2:
     st.subheader("🍕 توزيع المجهود والأنشطة")
     if not df_db_calc.empty and df_db_calc['المدة_بالدقائق'].sum() > 0:
-        # حساب إجمالي الدقائق لكل نشاط لتمثيلها في الرسم الدائري
         pie_data = df_db_calc.groupby('النشاط')['المدة_بالدقائق'].sum().reset_index()
         
         fig_pie = px.pie(
             pie_data, 
             values='المدة_بالدقائق', 
             names='النشاط',
-            hole=0.4, # يجعل المخطط الدائري على شكل دونات عصري ومريح للعين
+            hole=0.4,
             color_discrete_sequence=px.colors.qualitative.Pastel
         )
         fig_pie.update_traces(textposition='inside', textinfo='percent+label')
         fig_pie.update_layout(
             height=280,
             margin=dict(t=10, b=10, l=10, r=10),
-            showlegend=False # إخفاء الدليل الجانبي لأن الأسماء تظهر داخل الدائرة تلقائياً
+            showlegend=False
         )
         st.plotly_chart(fig_pie, use_container_width=True)
     else:
@@ -216,7 +214,7 @@ with col_graph2:
 st.markdown("---")
 
 # ==========================================
-# 3. قسم إدخال البيانات المطور (الساعة التفاعلية المستقرة)
+# 3. قسم إدخال البيانات (تم تعديل محاذاة الساعة تماماً هنا)
 # ==========================================
 st.subheader("📥 تسجيل نشاط جديد")
 
@@ -244,7 +242,8 @@ if auto_time:
     with c2:
         duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
 else:
-    c1, c2, c3 = st.columns([2, 1, 2])
+    # تقسيم متزن للأعمدة لمنع تمدد العناصر أفقياً بشكل عشوائي
+    c1, c2, c3 = st.columns([2, 1.5, 1.5])
     with c1:
         selected_activity = st.selectbox("النشاط", activities_list)
         if selected_activity == "➕ إضافة نشاط مخصص...":
@@ -253,13 +252,13 @@ else:
     with c2:
         target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
     with c3:
-        st.markdown("<label style='font-size:14px; font-weight:bold; color:#216e39;'>اضبط وقت النشاط بالساعة التفاعلية ⌚</label>", unsafe_allow_html=True)
-        
+        # ⌚ إصلاح المحاذاة: تم دمج العنوان بداخل حاوية الـ HTML متمركزاً بشكل عمودي مباشر فوق الساعة
         clock_html = f"""
-        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif;">
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; width: 100%;">
+            <label style='font-size:14px; font-weight:bold; color:#216e39; margin-bottom:8px; text-align:center;'>اضبط وقت النشاط بالساعة التفاعلية ⌚</label>
             <input type="time" id="analog_picker" value="{chosen_time_str}" 
                    style="font-size: 20px; padding: 8px; border-radius: 8px; border: 2px solid #40c463; text-align: center; width: 170px; font-weight:bold; color:#216e39; background-color:#fff; cursor:pointer;">
-            <p style="font-size:11px; color:#666; margin-top:6px; text-align:center;">انقر فوق التوقيت لتنبثق لك لوحة الساعة الدائرية</p>
+            <p style="font-size:11px; color:#666; margin-top:6px; text-align:center; margin-bottom:0;">انقر فوق التوقيت لتنبثق لك لوحة الساعة الدائرية</p>
         </div>
         <script>
             var picker = document.getElementById('analog_picker');
@@ -271,7 +270,7 @@ else:
             setTimeout(emitTime, 250);
         </script>
         """
-        clock_return = components.html(clock_html, height=105)
+        clock_return = components.html(clock_html, height=130)
         if clock_return:
             chosen_time_str = str(clock_return)
 
@@ -298,4 +297,70 @@ if st.button("➕ تسجيل النشاط وحفظه تلقائياً", use_cont
     
     exact_timestamp = combined_datetime.strftime('%Y-%m-%d %H:%M:%S')
     saved_year = combined_datetime.year
-    saved_month = months_list
+    saved_month = months_list[combined_datetime.month - 1]
+    saved_week = int(combined_datetime.isocalendar().week)
+    saved_day = combined_datetime.strftime('%A')
+    saved_hour = combined_datetime.strftime('%H:%M')
+    
+    unique_id = int(datetime.datetime.now().timestamp() * 1000)
+    duration_minutes = int(duration_hours * 60)
+    
+    new_row = {
+        'ID': unique_id,
+        'التاريخ': exact_timestamp,
+        'السنة': int(saved_year),
+        'الشهر': str(saved_month),
+        'الأسبوع': int(saved_week),
+        'اليوم': str(saved_day),
+        'الساعة': str(saved_hour),
+        'النشاط': str(final_activity),
+        'المدة_بالدقائق': duration_minutes
+    }
+    
+    df_db = pd.concat([df_db, pd.DataFrame([new_row])], ignore_index=True)
+    save_data(df_db)
+    st.session_state.db = df_db
+    st.toast(f"✅ تم تسجيل نشاط ({final_activity}) بنجاح!", icon="🔥")
+    st.rerun()
+
+# ==========================================
+# 4. عرض السجل العام، الحذف الفوري، والتصدير
+# ==========================================
+if not df_db.empty:
+    st.markdown("---")
+    st.subheader("📋 سجل التحكم بالبيانات وحذف الأسطر")
+    
+    display_df = df_db.copy()
+    display_df['حذف؟'] = False
+    display_df['المدة (ساعات)'] = round(display_df['المدة_بالدقائق'] / 60, 2)
+    
+    cols = ['حذف؟', 'التاريخ', 'النشاط', 'المدة (ساعات)', 'اليوم', 'الساعة']
+    display_df = display_df[[c for c in cols if c in display_df.columns]]
+    
+    edited_display = st.data_editor(
+        display_df,
+        column_config={"حذف؟": st.column_config.CheckboxColumn("إجراء الحذف", default=False)},
+        disabled=[col for col in display_df.columns if col != 'حذف؟'],
+        hide_index=True,
+        use_container_width=True,
+        key="data_editor_delete"
+    )
+    
+    indices_to_delete = edited_display[edited_display['حذف؟'] == True].index
+    
+    if len(indices_to_delete) > 0:
+        if st.button("🗑️ تأكيد حذف الأنشطة المحددة", type="primary"):
+            df_db = df_db.drop(indices_to_delete).reset_index(drop=True)
+            save_data(df_db)
+            st.session_state.db = df_db
+            st.toast("تم حذف الأنشطة المحددة بنجاح!", icon="🗑️")
+            st.rerun()
+
+    st.markdown("---")
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        clean_excel_df = df_db[[c for c in COLUMNS if c in df_db.columns]].copy()
+        clean_excel_df.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
+        workbook  = writer.book
+        worksheet = writer.sheets['الأنشطة اليومية']
+        worksheet.views.sheetView[0].showGrid
