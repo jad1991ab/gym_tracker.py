@@ -214,7 +214,7 @@ with col_graph2:
 st.markdown("---")
 
 # ==========================================
-# 3. قسم إدخال البيانات (تم تعديل محاذاة الساعة تماماً هنا)
+# 3. قسم إدخال البيانات (مع إصلاح المحاذاة التامة)
 # ==========================================
 st.subheader("📥 تسجيل نشاط جديد")
 
@@ -242,7 +242,6 @@ if auto_time:
     with c2:
         duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, value=1.0, step=0.5)
 else:
-    # تقسيم متزن للأعمدة لمنع تمدد العناصر أفقياً بشكل عشوائي
     c1, c2, c3 = st.columns([2, 1.5, 1.5])
     with c1:
         selected_activity = st.selectbox("النشاط", activities_list)
@@ -252,7 +251,7 @@ else:
     with c2:
         target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
     with c3:
-        # ⌚ إصلاح المحاذاة: تم دمج العنوان بداخل حاوية الـ HTML متمركزاً بشكل عمودي مباشر فوق الساعة
+        # هنا تم دمج العنوان وضبط التوسيط ليكون تماماً فوق الساعة دون أي انحراف
         clock_html = f"""
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; width: 100%;">
             <label style='font-size:14px; font-weight:bold; color:#216e39; margin-bottom:8px; text-align:center;'>اضبط وقت النشاط بالساعة التفاعلية ⌚</label>
@@ -363,4 +362,24 @@ if not df_db.empty:
         clean_excel_df.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='الأنشطة اليومية')
         workbook  = writer.book
         worksheet = writer.sheets['الأنشطة اليومية']
-        worksheet.views.sheetView[0].showGrid
+        
+        # التعديل الصحيح للكلمة المبتورة لتجنب انهيار التطبيق
+        worksheet.views.sheetView[0].showGridLines = True
+        worksheet.sheet_view.rightToLeft = True 
+
+    st.download_button(
+        label="📥 تحميل سجل تمارينك كملف Excel منسق ونظيف",
+        data=buffer.getvalue(),
+        file_name="my_gym_activities.xlsx",
+        mime="application/vnd.ms-excel",
+        use_container_width=True
+    )
+    
+    st.markdown("---")
+    if st.button("🚨 مسح السجل بالكامل والبدء من جديد"):
+        sheet.clear()
+        sheet.append_row(COLUMNS)
+        st.cache_data.clear()
+        st.session_state.db = pd.DataFrame(columns=COLUMNS)
+        st.success("تم تصفير قاعدة البيانات بنجاح ونظافة تامة!")
+        st.rerun()
