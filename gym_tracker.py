@@ -40,23 +40,7 @@ try:
 except Exception as e:
     st.error(f"خطأ في الاتصال بقاعدة البيانات: {e}")
 
-st.header("🟢 نظام متابعة الأنشطة المطور")
 
-st.markdown("### 📊 لوحة التحكم")
-
-c1,c2,c3,c4,c5,c6 = st.columns(6)
-
-c1.metric("🔥 السلسلة", current_streak)
-
-c2.metric("🏆 أفضل سلسلة", best_streak)
-
-c3.metric("⏱ إجمالي الساعات", total_hours)
-
-c4.metric("📋 الأنشطة", activities_count)
-
-c5.metric("🎯 ساعات اليوم", today_hours)
-
-c6.metric("⭐ النشاط المفضل", most_activity)
 
 @st.cache_data(ttl=600)
 def load_data():
@@ -230,6 +214,24 @@ if not df_db_calc.empty:
         best = max(best, temp)
 
     best_streak = best
+
+st.header("🟢 نظام متابعة الأنشطة المطور")
+
+st.markdown("### 📊 لوحة التحكم")
+
+c1,c2,c3,c4,c5,c6 = st.columns(6)
+
+c1.metric("🔥 السلسلة", current_streak)
+
+c2.metric("🏆 أفضل سلسلة", best_streak)
+
+c3.metric("⏱ إجمالي الساعات", total_hours)
+
+c4.metric("📋 الأنشطة", activities_count)
+
+c5.metric("🎯 ساعات اليوم", today_hours)
+
+c6.metric("⭐ النشاط المفضل", most_activity)
 
 # ==========================================
 # 1. شريط الإنجاز ومقارنة الأداء اليومي
@@ -510,7 +512,7 @@ elif current_streak >= 3:
 else:
     st.warning("🚀 ابدأ اليوم بالحفاظ على سلسلة الالتزام.")
 
-    
+
 # ==========================================
 # 3. قسم إدخال البيانات (مع إصلاح المحاذاة التامة)
 # ==========================================
