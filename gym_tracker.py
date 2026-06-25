@@ -42,6 +42,22 @@ except Exception as e:
 
 st.header("🟢 نظام متابعة الأنشطة المطور")
 
+st.markdown("### 📊 لوحة التحكم")
+
+c1,c2,c3,c4,c5,c6 = st.columns(6)
+
+c1.metric("🔥 السلسلة", current_streak)
+
+c2.metric("🏆 أفضل سلسلة", best_streak)
+
+c3.metric("⏱ إجمالي الساعات", total_hours)
+
+c4.metric("📋 الأنشطة", activities_count)
+
+c5.metric("🎯 ساعات اليوم", today_hours)
+
+c6.metric("⭐ النشاط المفضل", most_activity)
+
 @st.cache_data(ttl=600)
 def load_data():
     try:
@@ -86,6 +102,136 @@ else:
     df_db_calc['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
 
 # ==========================================
+# حساب الإحصائيات الاحترافية
+# ==========================================
+
+from datetime import timedelta
+
+# أهداف يمكن تعديلها لاحقاً من الإعدادات
+DAILY_GOAL = 2        # ساعة
+WEEKLY_GOAL = 14      # ساعة
+MONTHLY_GOAL = 60     # ساعة
+
+current_streak = 0
+best_streak = 0
+today_hours = 0
+week_hours = 0
+month_hours = 0
+total_hours = 0
+activities_count = 0
+most_activity = "-"
+
+if not df_db_calc.empty:
+
+    df_db_calc["date_only"] = pd.to_datetime(
+        df_db_calc["التاريخ"]
+    ).dt.date
+
+    #################################################
+    # إجمالي الساعات
+    #################################################
+
+    total_hours = round(
+        df_db_calc["المدة_بالدقائق"].sum()/60,
+        1
+    )
+
+    #################################################
+    # عدد الأنشطة
+    #################################################
+
+    activities_count = len(df_db_calc)
+
+    #################################################
+    # النشاط الأكثر ممارسة
+    #################################################
+
+    most_activity = (
+        df_db_calc.groupby("النشاط")["المدة_بالدقائق"]
+        .sum()
+        .idxmax()
+    )
+
+    #################################################
+    # ساعات اليوم
+    #################################################
+
+    today = datetime.date.today()
+
+    today_hours = round(
+        df_db_calc[
+            df_db_calc["date_only"] == today
+        ]["المدة_بالدقائق"].sum()/60,
+        1
+    )
+
+    #################################################
+    # ساعات الأسبوع
+    #################################################
+
+    start_week = today - timedelta(days=today.weekday())
+
+    week_hours = round(
+        df_db_calc[
+            df_db_calc["date_only"] >= start_week
+        ]["المدة_بالدقائق"].sum()/60,
+        1
+    )
+
+    #################################################
+    # ساعات الشهر
+    #################################################
+
+    month_hours = round(
+        df_db_calc[
+            (pd.to_datetime(df_db_calc["date_only"]).dt.month == today.month)
+            &
+            (pd.to_datetime(df_db_calc["date_only"]).dt.year == today.year)
+        ]["المدة_بالدقائق"].sum()/60,
+        1
+    )
+
+    #################################################
+    # Current Streak
+    #################################################
+
+    unique_days = sorted(
+        set(df_db_calc["date_only"])
+    )
+
+    streak = 0
+
+    check_day = today
+
+    while check_day in unique_days:
+        streak += 1
+        check_day -= timedelta(days=1)
+
+    current_streak = streak
+
+    #################################################
+    # Best Streak
+    #################################################
+
+    best = 0
+    temp = 1
+
+    if len(unique_days) > 0:
+
+        for i in range(1, len(unique_days)):
+
+            if unique_days[i] == unique_days[i-1] + timedelta(days=1):
+                temp += 1
+
+            else:
+                best = max(best, temp)
+                temp = 1
+
+        best = max(best, temp)
+
+    best_streak = best
+
+# ==========================================
 # 1. شريط الإنجاز ومقارنة الأداء اليومي
 # ==========================================
 st.subheader("🎯 مؤشر الإنجاز ومقارنة الأداء")
@@ -111,6 +257,40 @@ with col_p2:
     st.metric("إنجاز اليوم الفعلي", f"{total_today_hours} ساعة", delta=f"{delta_performance} عن المعتاد" if delta_performance != total_today_hours else "أول نشاط")
 with col_p3:
     st.metric("متوسط إنجازك اليومي السابق", f"{avg_previous_hours} ساعة")
+
+st.markdown("---")
+
+# ==========================================
+# الأهداف اليومية والأسبوعية والشهرية
+# ==========================================
+
+st.subheader("🎯 التقدم نحو الأهداف")
+
+goal1, goal2, goal3 = st.columns(3)
+
+with goal1:
+    daily_progress = min(today_hours / DAILY_GOAL, 1.0)
+    st.metric(
+        "🎯 الهدف اليومي",
+        f"{today_hours:.1f}/{DAILY_GOAL} ساعة"
+    )
+    st.progress(daily_progress)
+
+with goal2:
+    weekly_progress = min(week_hours / WEEKLY_GOAL, 1.0)
+    st.metric(
+        "📅 الهدف الأسبوعي",
+        f"{week_hours:.1f}/{WEEKLY_GOAL} ساعة"
+    )
+    st.progress(weekly_progress)
+
+with goal3:
+    monthly_progress = min(month_hours / MONTHLY_GOAL, 1.0)
+    st.metric(
+        "🗓️ الهدف الشهري",
+        f"{month_hours:.1f}/{MONTHLY_GOAL} ساعة"
+    )
+    st.progress(monthly_progress)
 
 st.markdown("---")
 
@@ -242,6 +422,95 @@ with col_graph2:
 
 st.markdown("---")
 
+# ==========================================
+# تطور الأداء خلال آخر 30 يوماً
+# ==========================================
+
+st.subheader("📈 تطور الأداء خلال آخر 30 يوماً")
+
+if not df_db_calc.empty:
+
+    last30 = datetime.date.today() - datetime.timedelta(days=29)
+
+    trend = (
+        df_db_calc[df_db_calc["date_only"] >= last30]
+        .groupby("date_only")["المدة_بالدقائق"]
+        .sum()
+        .reset_index()
+    )
+
+    trend["الساعات"] = trend["المدة_بالدقائق"] / 60
+
+    all_dates = pd.DataFrame({
+        "date_only": pd.date_range(
+            last30,
+            datetime.date.today()
+        )
+    })
+
+    all_dates["date_only"] = all_dates["date_only"].dt.date
+
+    trend = (
+        all_dates.merge(
+            trend,
+            on="date_only",
+            how="left"
+        )
+        .fillna(0)
+    )
+
+    trend["الساعات"] = trend["المدة_بالدقائق"] / 60
+
+    fig_line = px.line(
+        trend,
+        x="date_only",
+        y="الساعات",
+        markers=True,
+        title="آخر 30 يوماً"
+    )
+
+    fig_line.update_layout(
+        height=350,
+        xaxis_title="التاريخ",
+        yaxis_title="عدد الساعات",
+        margin=dict(
+            l=10,
+            r=10,
+            t=40,
+            b=10
+        )
+    )
+
+    st.plotly_chart(
+        fig_line,
+        use_container_width=True,
+        config={
+            "displayModeBar": False
+        }
+    )
+
+else:
+
+    st.info("لا توجد بيانات كافية لعرض المخطط.")
+
+st.markdown("---")
+
+if current_streak >= 30:
+    st.success("🏆 أداء مذهل! لديك سلسلة التزام تتجاوز 30 يوماً.")
+
+elif current_streak >= 14:
+    st.success("🔥 رائع! أنت ملتزم منذ أسبوعين متتاليين.")
+
+elif current_streak >= 7:
+    st.success("💪 أحسنت! أكملت أسبوعاً كاملاً من الالتزام.")
+
+elif current_streak >= 3:
+    st.info("👏 استمر، أنت تبني عادة ممتازة.")
+
+else:
+    st.warning("🚀 ابدأ اليوم بالحفاظ على سلسلة الالتزام.")
+
+    
 # ==========================================
 # 3. قسم إدخال البيانات (مع إصلاح المحاذاة التامة)
 # ==========================================
