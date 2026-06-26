@@ -215,6 +215,55 @@ if not df_db_calc.empty:
 
     best_streak = best
 
+# ==========================================
+# نظام الإنجازات
+# ==========================================
+
+achievements = []
+
+# أول نشاط
+if activities_count >= 1:
+    achievements.append(("🌱", "البداية", True))
+else:
+    achievements.append(("🌱", "البداية", False))
+
+# 10 ساعات
+if total_hours >= 10:
+    achievements.append(("⏱️", "أول 10 ساعات", True))
+else:
+    achievements.append(("⏱️", "أول 10 ساعات", False))
+
+# 50 ساعة
+if total_hours >= 50:
+    achievements.append(("💪", "50 ساعة", True))
+else:
+    achievements.append(("💪", "50 ساعة", False))
+
+# 100 ساعة
+if total_hours >= 100:
+    achievements.append(("🚀", "100 ساعة", True))
+else:
+    achievements.append(("🚀", "100 ساعة", False))
+
+# أسبوع متواصل
+if current_streak >= 7:
+    achievements.append(("🔥", "7 أيام متتالية", True))
+else:
+    achievements.append(("🔥", "7 أيام متتالية", False))
+
+# شهر متواصل
+if current_streak >= 30:
+    achievements.append(("🏆", "30 يوماً متتالياً", True))
+else:
+    achievements.append(("🏆", "30 يوماً متتالياً", False))
+
+# 100 نشاط
+if activities_count >= 100:
+    achievements.append(("📋", "100 نشاط", True))
+else:
+    achievements.append(("📋", "100 نشاط", False))
+
+
 st.header("🟢 نظام متابعة الأنشطة المطور")
 
 st.markdown("### 📊 لوحة التحكم")
@@ -232,6 +281,21 @@ c4.metric("📋 الأنشطة", activities_count)
 c5.metric("🎯 ساعات اليوم", today_hours)
 
 c6.metric("⭐ النشاط المفضل", most_activity)
+
+st.markdown("---")
+st.subheader("🏆 الإنجازات")
+
+cols = st.columns(2)
+
+for i, (icon, name, unlocked) in enumerate(achievements):
+
+    with cols[i % 2]:
+
+        if unlocked:
+            st.success(f"{icon} {name}")
+
+        else:
+            st.info(f"🔒 {icon} {name}")
 
 # ==========================================
 # 1. شريط الإنجاز ومقارنة الأداء اليومي
@@ -261,6 +325,14 @@ with col_p3:
     st.metric("متوسط إنجازك اليومي السابق", f"{avg_previous_hours} ساعة")
 
 st.markdown("---")
+
+completed = sum(1 for _, _, unlocked in achievements if unlocked)
+
+st.progress(completed / len(achievements))
+
+st.caption(
+    f"تم فتح {completed} من أصل {len(achievements)} إنجاز"
+)
 
 # ==========================================
 # الأهداف اليومية والأسبوعية والشهرية
