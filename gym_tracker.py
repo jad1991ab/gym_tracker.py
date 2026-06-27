@@ -25,8 +25,7 @@ COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع',
 @st.cache_resource
 def get_sheet_and_init():
     """
-    حل مشكلة Quota 429: نضع التحقق وإنشاء الأعمدة هنا داخل الكاش 
-    لكي يتم استدعاؤه مرة واحدة فقط عند إقلاع التطبيق، وليس مع كل ثانية في عداد الوقت.
+    تحسين استقرار: يتم استدعاؤه مرة واحدة فقط عند إقلاع التطبيق لمنع استهلاك الـ Quota.
     """
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
@@ -44,7 +43,6 @@ def get_sheet_and_init():
             worksheet.append_row(COLUMNS)
         else:
             if 'الملاحظات' not in first_row:
-                # إذا كان الجدول قديماً ولا يحتوي على عمود الملاحظات، نقوم بتحديث الرأس بأمان
                 for idx, col in enumerate(COLUMNS):
                     worksheet.update_cell(1, idx + 1, col)
     except Exception:
@@ -52,7 +50,7 @@ def get_sheet_and_init():
         
     return worksheet
 
-# استدعاء قاعدة البيانات الآمن
+# استدعاء قاعدة البيانات
 try:
     sheet = get_sheet_and_init()
 except Exception as e:
@@ -66,7 +64,6 @@ def load_data():
             return pd.DataFrame(columns=COLUMNS)
         df = pd.DataFrame(records)
         
-        # حل مشكلة KeyError: فحص يدوي للتأكد من تعبئة الأعمدة المفقودة محلياً في الـ DataFrame
         if 'المدة_بالدقائق' not in df.columns:
             df['المدة_بالدقائق'] = 60
         if 'الملاحظات' not in df.columns:
@@ -78,7 +75,8 @@ def load_data():
         st.error(f"خطأ أثناء قراءة Google Sheet: {e}")
         return pd.DataFrame(columns=COLUMNS)
 
-def save_data(df):
+def save_data_complete(df):
+    """تُستدعى فقط عند مسح الجدول أو إجراء عمليات حذف لأسطر معينة"""
     try:
         clean_df = df[[c for c in COLUMNS if c in df.columns]].copy()
         sheet.clear()
@@ -92,75 +90,25 @@ if 'db' not in st.session_state:
 
 df_db = st.session_state.db
 
-# تجهيز متغيرات الوقت للحسابات
+# تجهيز متغيرات الوقت الحالية الأساسية
 now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
 current_year = now.year
 
-if not df_db.empty:
-    df_db_calc_base = df_db.copy()
-    df_db_calc_base['تاريخ_صحيح'] = pd.to_datetime(df_db_calc_base['التاريخ'], errors='coerce')
-    df_db_calc_base['تاريخ_يومي_مختصر'] = df_db_calc_base['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
-    df_db_calc_base['المدة_بالدقائق'] = pd.to_numeric(df_db_calc_base['المدة_بالدقائق'], errors='coerce').fillna(0)
-    df_db_calc_base['الملاحظات'] = df_db_calc_base['الملاحظات'].fillna("")
-else:
-    df_db_calc_base = df_db.copy()
-    df_db_calc_base['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
-    df_db_calc_base['الملاحظات'] = pd.Series(dtype='str')
-
 # ==========================================
-# نظام القوائم والتنقل
+# 🧭 نظام القوائم والتنقل
 # ==========================================
 st.sidebar.title("🧭 قائمة التنقل")
 page = st.sidebar.radio("اختر الصفحة:", ["📥 تسجيل نشاط جديد", "📊 لوحة التحكم والإحصاءات"])
 
-# حساب الإحصائيات الشاملة (لغرض السلاسل الزمنية غير المفلترة)
-current_streak = 0
-best_streak = 0
-activities_count = 0
 
-if not df_db_calc_base.empty:
-    df_db_calc_base["date_only"] = pd.to_datetime(df_db_calc_base["التاريخ"]).dt.date
-    activities_count = len(df_db_calc_base)
-    today = datetime.date.today()
-    unique_days = sorted(set(df_db_calc_base["date_only"]))
-    
-    streak = 0
-    check_day = today
-    while check_day in unique_days:
-        streak += 1
-        check_day -= timedelta(days=1)
-    current_streak = streak
-
-    best = 0
-    temp = 1
-    if len(unique_days) > 0:
-        for i in range(1, len(unique_days)):
-            if unique_days[i] == unique_days[i-1] + timedelta(days=1):
-                temp += 1
-            else:
-                best = max(best, temp)
-                temp = 1
-        best = max(best, temp)
-    best_streak = best
-
-total_hours_base = round(df_db_calc_base["المدة_بالدقائق"].sum()/60, 1) if not df_db_calc_base.empty else 0
-achievements = [
-    ("🌱", "البداية", activities_count >= 1),
-    ("⏱️", "أول 10 ساعات", total_hours_base >= 10),
-    ("💪", "50 ساعة", total_hours_base >= 50),
-    ("🚀", "100 ساعة", total_hours_base >= 100),
-    ("🔥", "7 أيام متتالية", current_streak >= 7),
-    ("🏆", "30 يوماً متتالياً", current_streak >= 30),
-    ("📋", "100 نشاط", activities_count >= 100)
-]
-
-# حل مشكلة الـ StreamlitAPIException بأزرار التوقيت السريع عبر Callback آمنة
+# دالة تغيير الحقول السريعة للتوقيت (Callback آمن)
 def update_duration(target_value):
     st.session_state.duration_input = target_value
 
+
 # ==========================================
-# 1. صفحة تسجيل البيانات وعمليات الإدخال
+# 1. صفحة: تسجيل نشاط جديد (أصبحت خفيفة وسريعة جداً)
 # ==========================================
 if page == "📥 تسجيل نشاط جديد":
     st.header("🟢 نظام تسجيل ومتابعة الأنشطة")
@@ -233,10 +181,10 @@ if page == "📥 تسجيل نشاط جديد":
             selected_activity = st.selectbox("النشاط", activities_list)
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
-            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أكتاف، قراءة الفصل الرابع")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أرجل، إنهاء الفصل الثالث")
         with c2:
             duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, step=0.5, key="duration_input")
-            st.caption("⏱️ أزرار تعيين الوقت السريعة والمحمية:")
+            st.caption("⏱️ أزرار تعيين الوقت السريعة:")
             b1, b2, b3, b4 = st.columns(4)
             with b1: st.button("⏱️ 30 د", use_container_width=True, on_click=update_duration, args=(0.5,))
             with b2: st.button("⏱️ 1 ساعة", use_container_width=True, on_click=update_duration, args=(1.0,))
@@ -249,7 +197,7 @@ if page == "📥 تسجيل نشاط جديد":
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
             duration_hours = st.number_input("المدة (بالساعات)", min_value=0.1, max_value=24.0, step=0.5, key="duration_input")
-            st.caption("⏱️ أزرار تعيين الوقت السريعة والمحمية:")
+            st.caption("⏱️ أزرار تعيين الوقت السريعة:")
             b1, b2, b3, b4 = st.columns(4)
             with b1: st.button("⏱️ 30 د", use_container_width=True, key="m1", on_click=update_duration, args=(0.5,))
             with b2: st.button("⏱️ 1 ساعة", use_container_width=True, key="m2", on_click=update_duration, args=(1.0,))
@@ -294,25 +242,30 @@ if page == "📥 تسجيل نشاط جديد":
         combined_datetime = datetime.datetime.combine(target_date, target_time)
         duration_minutes = int(duration_hours * 60)
         
-        new_row = {
-            'ID': int(datetime.datetime.now().timestamp() * 1000),
-            'التاريخ': combined_datetime.strftime('%Y-%m-%d %H:%M:%S'),
-            'السنة': int(combined_datetime.year),
-            'الشهر': str(months_list[combined_datetime.month - 1]),
-            'الأسبوع': int(combined_datetime.isocalendar().week),
-            'اليوم': str(combined_datetime.strftime('%A')),
-            'الساعة': str(combined_datetime.strftime('%H:%M')),
-            'النشاط': str(final_activity),
-            'المدة_بالدقائق': duration_minutes,
-            'الملاحظات': str(activity_notes.strip())
-        }
+        # تجهيز المصفوفة الترتيبية لإرسالها
+        row_to_append = [
+            int(datetime.datetime.now().timestamp() * 1000),             # ID
+            combined_datetime.strftime('%Y-%m-%d %H:%M:%S'),            # التاريخ
+            int(combined_datetime.year),                                 # السنة
+            str(months_list[combined_datetime.month - 1]),               # الشهر
+            int(combined_datetime.isocalendar().week),                   # الأسبوع
+            str(combined_datetime.strftime('%A')),                       # اليوم
+            str(combined_datetime.strftime('%H:%M')),                    # الساعة
+            str(final_activity),                                         # النشاط
+            duration_minutes,                                            # المدة_بالدقائق
+            str(activity_notes.strip())                                  # الملاحظات
+        ]
         
-        df_db = pd.concat([df_db, pd.DataFrame([new_row])], ignore_index=True)
-        save_data(df_db)
-        st.session_state.db = df_db
-        st.session_state.elapsed_time = 0
-        st.toast(f"✅ تم تسجيل نشاط ({final_activity}) بنجاح!", icon="🔥")
-        st.rerun()
+        try:
+            # 🚀 تحسين الأداء: استخدام append_row مباشرة بدلاً من مسح وإعادة رفع الجدول بالكامل
+            sheet.append_row(row_to_append)
+            st.cache_data.clear() # تفريغ الكاش الموضعي لجلب المدخل الجديد فوراً
+            st.session_state.db = load_data()
+            st.session_state.elapsed_time = 0
+            st.toast(f"✅ تم حفظ السطر الجديد مباشرة في Google Sheet بنجاح!", icon="🚀")
+            st.rerun()
+        except Exception as e:
+            st.error(f"فشل الحفظ المباشر، جاري الحفظ الاحتياطي: {e}")
 
     if not df_db.empty:
         st.markdown("---")
@@ -336,18 +289,61 @@ if page == "📥 تسجيل نشاط جديد":
         if len(indices_to_delete) > 0:
             if st.button("🗑️ تأكيد حذف الأنشطة المحددة", type="primary"):
                 df_db = df_db.drop(indices_to_delete).reset_index(drop=True)
-                save_data(df_db)
+                save_data_complete(df_db)
                 st.session_state.db = df_db
                 st.toast("تم حذف الأنشطة المحددة بنجاح!", icon="🗑️")
                 st.rerun()
 
+
 # ==========================================
-# 2. صفحة لوحة التحكم والإحصاءات المتقدمة
+# 2. صفحة لوحة التحكم والإحصاءات (Lazy Evaluation)
 # ==========================================
 elif page == "📊 لوحة التحكم والإحصاءات":
     st.header("📊 لوحة التحكم والأداء العام")
     
-    # الفلاتر المتقدمة
+    # ⚙️ تحسين الأداء: معالجة وتحويل البيانات والإحصاءات تتم هنا فقط عند فتح الصفحة
+    if not df_db.empty:
+        df_db_calc_base = df_db.copy()
+        df_db_calc_base['تاريخ_صحيح'] = pd.to_datetime(df_db_calc_base['التاريخ'], errors='coerce')
+        df_db_calc_base['تاريخ_يومي_مختصر'] = df_db_calc_base['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
+        df_db_calc_base['المدة_بالدقائق'] = pd.to_numeric(df_db_calc_base['المدة_بالدقائق'], errors='coerce').fillna(0)
+        df_db_calc_base['الملاحظات'] = df_db_calc_base['الملاحظات'].fillna("")
+        df_db_calc_base["date_only"] = df_db_calc_base["تاريخ_صحيح"].dt.date
+    else:
+        df_db_calc_base = df_db.copy()
+        df_db_calc_base['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
+        df_db_calc_base['الملاحظات'] = pd.Series(dtype='str')
+        df_db_calc_base["date_only"] = pd.Series(dtype='object')
+
+    # حساب السلاسل الالتزامية (Streaks) الكلية
+    current_streak = 0
+    best_streak = 0
+    activities_count = len(df_db_calc_base)
+
+    if not df_db_calc_base.empty and 'date_only' in df_db_calc_base.columns:
+        today = datetime.date.today()
+        unique_days = sorted(set(df_db_calc_base["date_only"].dropna()))
+        
+        streak = 0
+        check_day = today
+        while check_day in unique_days:
+            streak += 1
+            check_day -= timedelta(days=1)
+        current_streak = streak
+
+        best = 0
+        temp = 1
+        if len(unique_days) > 0:
+            for i in range(1, len(unique_days)):
+                if unique_days[i] == unique_days[i-1] + timedelta(days=1):
+                    temp += 1
+                else:
+                    best = max(best, temp)
+                    temp = 1
+            best = max(best, temp)
+        best_streak = best
+
+    # نظام الفلاتر المتقدمة
     st.markdown("### 🔍 نظام التصفية والفلترة المتقدم للرسوم البيانية")
     f_col1, f_col2 = st.columns(2)
     
@@ -359,7 +355,7 @@ elif page == "📊 لوحة التحكم والإحصاءات":
     with f_col2:
         f_month = st.selectbox("📅 فلترة حسب الشهر المطلوب الاستعلام عنه:", month_options)
         
-    # تطبيق الفلترة التفاعلية
+    # تطبيق الفلترة التفاعلية ديناميكياً
     df_db_calc = df_db_calc_base.copy()
     if f_activity != "الكل":
         df_db_calc = df_db_calc[df_db_calc['النشاط'] == f_activity]
@@ -411,8 +407,7 @@ elif page == "📊 لوحة التحكم والإحصاءات":
     st.markdown("---")
     st.subheader("🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)")
     
-    start_date, end_date = datetime.date(current_year, 1, 1), datetime.date(current_year, 12, 31)
-    all_days = pd.date_range(start=start_date, end=end_date)
+    all_days = pd.date_range(start=datetime.date(current_year, 1, 1), end=datetime.date(current_year, 12, 31))
     df_year_grid = pd.DataFrame({'تاريخ_صحيح': all_days})
     df_year_grid['تاريخ_يومي_مختصر'] = df_year_grid['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
     df_year_grid['الأسبوع_السنوي'] = df_year_grid['تاريخ_صحيح'].dt.isocalendar().week
