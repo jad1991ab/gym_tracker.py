@@ -85,8 +85,9 @@ else:
     df_db_calc = df_db.copy()
     df_db_calc['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
 
+
 # ==========================================
-# 🎨 تحسين 1: قاموس الأيقونات التلقائية للأنشطة
+# 🎨 قاموس الأيقونات التلقائية للأنشطة
 # ==========================================
 ACTIVITY_EMOJIS = {
     "النادي": "🏋️‍♂️",
@@ -99,23 +100,21 @@ ACTIVITY_EMOJIS = {
 }
 
 def get_activity_with_emoji(activity_name):
-    """إضافة إيموجي تلقائي لاسم النشاط إذا لم يكن يحتوي على واحد بالفعل"""
     name_clean = activity_name.strip()
-    # إذا كان النشاط يحتوي بالفعل على إيموجي، اتركه كما هو
     if any(char in name_clean for char in ["🏋️‍♂️", "📚", "💼", "📖", "🏃‍♂️", "💻", "🧘‍♂️", "➕"]):
         return name_clean
-    
-    # البحث في القاموس عن كلمة مفتاحية مطابقة
     for key, emoji in ACTIVITY_EMOJIS.items():
         if key in name_clean:
             return f"{name_clean} {emoji}"
     return name_clean
 
+
 # ==========================================
-# نظام التنقل الجانبي (Navigation)
+# 🧭 نظام التنقل الجانبي (Navigation)
 # ==========================================
 st.sidebar.title("🧭 قائمة التنقل")
 page = st.sidebar.radio("اختر الصفحة:", ["📥 تسجيل نشاط جديد", "📊 لوحة التحكم والإحصاءات"])
+
 
 # ==========================================
 # حساب الإحصائيات (مطلوب للحساب العام)
@@ -179,6 +178,13 @@ achievements.append(("📋", "100 نشاط", activities_count >= 100))
 
 
 # ==========================================
+# 🛠️ دالة الـ Callback المخصصة لإصلاح مشكلة الأزرار السريعة
+# ==========================================
+def update_duration(target_value):
+    st.session_state.duration_input = target_value
+
+
+# ==========================================
 # 1. الصفحة الرئيسية: تسجيل نشاط جديد
 # ==========================================
 if page == "📥 تسجيل نشاط جديد":
@@ -202,7 +208,7 @@ if page == "📥 تسجيل نشاط جديد":
     target_date = now.date()
     chosen_time_str = now.strftime('%H:%M')
 
-    # تهيئة حالة الجلسة (Session State) لزر التوقيت السريع إن لم تكن موجودة
+    # تهيئة مفتاح الإدخال الافتراضي في حالة عدم وجوده لمنع الأخطاء البصرية
     if "duration_input" not in st.session_state:
         st.session_state.duration_input = 1.0
 
@@ -215,25 +221,16 @@ if page == "📥 تسجيل نشاط جديد":
         with c2:
             duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, step=0.5, key="duration_input")
             
-            # ⏱️ تحسين 2: أزرار التوقيت السريعة (Quick Timers)
             st.caption("⏱️ أزرار التوقيت السريعة:")
             b1, b2, b3, b4 = st.columns(4)
             with b1:
-                if st.button("⏱️ 30 د", use_container_width=True):
-                    st.session_state.duration_input = 0.5
-                    st.rerun()
+                st.button("⏱️ 30 د", use_container_width=True, on_click=update_duration, args=(0.5,))
             with b2:
-                if st.button("⏱️ 1 ساعة", use_container_width=True):
-                    st.session_state.duration_input = 1.0
-                    st.rerun()
+                st.button("⏱️ 1 ساعة", use_container_width=True, on_click=update_duration, args=(1.0,))
             with b3:
-                if st.button("⏱️ 1.5 س", use_container_width=True):
-                    st.session_state.duration_input = 1.5
-                    st.rerun()
+                st.button("⏱️ 1.5 س", use_container_width=True, on_click=update_duration, args=(1.5,))
             with b4:
-                if st.button("⏱️ 2 ساعتين", use_container_width=True):
-                    st.session_state.duration_input = 2.0
-                    st.rerun()
+                st.button("⏱️ 2 ساعتين", use_container_width=True, on_click=update_duration, args=(2.0,))
     else:
         c1, c2, c3 = st.columns([2, 1.5, 1.5])
         with c1:
@@ -242,25 +239,16 @@ if page == "📥 تسجيل نشاط جديد":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
             duration_hours = st.number_input("المدة (بالساعات)", min_value=0.1, max_value=24.0, step=0.5, key="duration_input")
             
-            # أزرار التوقيت السريعة في الوضع اليدوي أيضاً
             st.caption("⏱️ أزرار التوقيت السريعة:")
             b1, b2, b3, b4 = st.columns(4)
             with b1:
-                if st.button("⏱️ 30 د", use_container_width=True, key="m1"):
-                    st.session_state.duration_input = 0.5
-                    st.rerun()
+                st.button("⏱️ 30 د", use_container_width=True, key="m1", on_click=update_duration, args=(0.5,))
             with b2:
-                if st.button("⏱️ 1 ساعة", use_container_width=True, key="m2"):
-                    st.session_state.duration_input = 1.0
-                    st.rerun()
+                st.button("⏱️ 1 ساعة", use_container_width=True, key="m2", on_click=update_duration, args=(1.0,))
             with b3:
-                if st.button("⏱️ 1.5 س", use_container_width=True, key="m3"):
-                    st.session_state.duration_input = 1.5
-                    st.rerun()
+                st.button("⏱️ 1.5 س", use_container_width=True, key="m3", on_click=update_duration, args=(1.5,))
             with b4:
-                if st.button("⏱️ 2 ساعتين", use_container_width=True, key="m4"):
-                    st.session_state.duration_input = 2.0
-                    st.rerun()
+                st.button("⏱️ 2 ساعتين", use_container_width=True, key="m4", on_click=update_duration, args=(2.0,))
         with c2:
             target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
         with c3:
@@ -334,7 +322,6 @@ if page == "📥 تسجيل نشاط جديد":
         st.toast(f"✅ تم تسجيل نشاط ({final_activity}) بنجاح!", icon="🔥")
         st.rerun()
 
-    # سجل التحكم بالبيانات والحذف في الصفحة الرئيسية لسهولة الإدارة
     if not df_db.empty:
         st.markdown("---")
         st.subheader("📋 سجل التحكم بالبيانات وحذف الأسطر")
@@ -532,7 +519,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
             showscale=False
         ))
 
-        # 🌓 تحسين 3: جعل خلفية المخطط الحراري شفافة لتتناسب تلقائياً مع المظهر الداكن/المضيء
         fig_heatmap.update_layout(
             height=420,
             margin=dict(t=40, b=10, l=5, r=5),
@@ -550,7 +536,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
             fig_pie = px.pie(pie_data, values='المدة_بالدقائق', names='النشاط', hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             
-            # 🌓 تحسين 3: جعل خلفية المخطط الدائري شفافة
             fig_pie.update_layout(
                 height=280, 
                 margin=dict(t=10, b=10, l=10, r=10), 
@@ -578,7 +563,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
 
         fig_line = px.line(trend, x="date_only", y="الساعات", markers=True, title="آخر 30 يوماً")
         
-        # 🌓 تحسين 3: جعل خلفية مخطط الخطوط شفافة
         fig_line.update_layout(
             height=350, 
             xaxis_title="التاريخ", 
