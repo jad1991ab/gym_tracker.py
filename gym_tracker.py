@@ -24,9 +24,6 @@ COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع',
 
 @st.cache_resource
 def get_sheet_and_init():
-    """
-    تحسين استقرار: يتم استدعاؤه مرة واحدة فقط عند إقلاع التطبيق لمنع استهلاك الـ Quota.
-    """
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=SCOPES
@@ -36,7 +33,6 @@ def get_sheet_and_init():
     spreadsheet = client.open(sheet_name)
     worksheet = spreadsheet.sheet1
     
-    # التحقق من وجود الأعمدة وتحديث الجدول مرة واحدة فقط
     try:
         first_row = worksheet.row_values(1)
         if not first_row:
@@ -50,7 +46,6 @@ def get_sheet_and_init():
         
     return worksheet
 
-# استدعاء قاعدة البيانات
 try:
     sheet = get_sheet_and_init()
 except Exception as e:
@@ -76,7 +71,6 @@ def load_data():
         return pd.DataFrame(columns=COLUMNS)
 
 def save_data_complete(df):
-    """تُستدعى فقط عند مسح الجدول أو إجراء عمليات حذف لأسطر معينة"""
     try:
         clean_df = df[[c for c in COLUMNS if c in df.columns]].copy()
         sheet.clear()
@@ -90,10 +84,13 @@ if 'db' not in st.session_state:
 
 df_db = st.session_state.db
 
-# تجهيز متغيرات الوقت الحالية الأساسية
 now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
 current_year = now.year
+
+# تهيئة متغير إدخال المدة برمجياً لمنع تعطل الأزرار وساعة الإيقاف
+if "duration_input" not in st.session_state:
+    st.session_state.duration_input = 1.0
 
 # ==========================================
 # 🧭 نظام القوائم والتنقل
@@ -101,19 +98,15 @@ current_year = now.year
 st.sidebar.title("🧭 قائمة التنقل")
 page = st.sidebar.radio("اختر الصفحة:", ["📥 تسجيل نشاط جديد", "📊 لوحة التحكم والإحصاءات"])
 
-
-# دالة تغيير الحقول السريعة للتوقيت (Callback آمن)
 def update_duration(target_value):
-    st.session_state.duration_input = target_value
-
+    st.session_state.duration_input = float(target_value)
 
 # ==========================================
-# 1. صفحة: تسجيل نشاط جديد (أصبحت خفيفة وسريعة جداً)
+# 1. صفحة: تسجيل نشاط جديد
 # ==========================================
 if page == "📥 تسجيل نشاط جديد":
     st.header("🟢 نظام تسجيل ومتابعة الأنشطة")
     
-    # ساعة الإيقاف التفاعلية الذكية
     st.markdown("### ⏱️ ساعة الإيقاف والتركيز الحي")
     stop_col1, stop_col2 = st.columns([2, 1])
     
@@ -132,9 +125,14 @@ if page == "📥 تسجيل نشاط جديد":
             st.session_state.elapsed_time = time.time() - st.session_state.stopwatch_start
             if st.button("⏸️ إنهاء النشاط المباشر وتعبئة الوقت المكتسب تلقائياً", use_container_width=True, type="primary"):
                 st.session_state.stopwatch_running = False
+                
+                # حساب الساعات بدقة وتحويلها لكسر عشري دقيق (مثال: 45 دقيقة تظهر 0.75 ساعة)
                 calc_hours = round(st.session_state.elapsed_time / 3600, 2)
+                
+                # إذا كان الوقت المسجل صغير جداً (أقل من دقيقة)، نضع حد أدنى 0.1 لتفادي أخطاء الحقول الرقمية
                 st.session_state.duration_input = max(calc_hours, 0.1)
-                st.toast(f"تم ملء حقل الساعات بالأسفل بـ {max(calc_hours, 0.1)} ساعة!", icon="⏱️")
+                
+                st.toast(f"📥 تم تحديث الحقل الرقمي بالأسفل بـ {st.session_state.duration_input} ساعة!", icon="⏱️")
                 st.rerun()
                 
     with stop_col2:
@@ -152,6 +150,7 @@ if page == "📥 تسجيل نشاط جديد":
                 st.metric("⏱️ الوقت المسجل الجاهز", f"{hrs:02d}:{mins:02d}:{secs:02d}")
                 if st.button("🔄 إعادة تصفير ساعة الإيقاف"):
                     st.session_state.elapsed_time = 0
+                    st.session_state.duration_input = 1.0
                     st.rerun()
 
     st.markdown("---")
@@ -172,18 +171,16 @@ if page == "📥 تسجيل نشاط جديد":
     target_date = now.date()
     chosen_time_str = now.strftime('%H:%M')
 
-    if "duration_input" not in st.session_state:
-        st.session_state.duration_input = 1.0
-
     if auto_time:
         c1, c2 = st.columns(2)
         with c1:
             selected_activity = st.selectbox("النشاط", activities_list)
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
-            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أرجل، إنهاء الفصل الثالث")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أكتاف، قراءة الكتاب")
         with c2:
-            duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, step=0.5, key="duration_input")
+            # استخدام المفتاح الثابت المرتبط بالـ session state لحل المشكلة جذرياً
+            duration_hours = st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, step=0.05, key="duration_input")
             st.caption("⏱️ أزرار تعيين الوقت السريعة:")
             b1, b2, b3, b4 = st.columns(4)
             with b1: st.button("⏱️ 30 د", use_container_width=True, on_click=update_duration, args=(0.5,))
@@ -196,7 +193,7 @@ if page == "📥 تسجيل نشاط جديد":
             selected_activity = st.selectbox("النشاط", activities_list)
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:")
-            duration_hours = st.number_input("المدة (بالساعات)", min_value=0.1, max_value=24.0, step=0.5, key="duration_input")
+            duration_hours = st.number_input("المدة (بالساعات)", min_value=0.1, max_value=24.0, step=0.05, key="duration_input")
             st.caption("⏱️ أزرار تعيين الوقت السريعة:")
             b1, b2, b3, b4 = st.columns(4)
             with b1: st.button("⏱️ 30 د", use_container_width=True, key="m1", on_click=update_duration, args=(0.5,))
@@ -242,7 +239,6 @@ if page == "📥 تسجيل نشاط جديد":
         combined_datetime = datetime.datetime.combine(target_date, target_time)
         duration_minutes = int(duration_hours * 60)
         
-        # تجهيز المصفوفة الترتيبية لإرسالها
         row_to_append = [
             int(datetime.datetime.now().timestamp() * 1000),             # ID
             combined_datetime.strftime('%Y-%m-%d %H:%M:%S'),            # التاريخ
@@ -257,15 +253,15 @@ if page == "📥 تسجيل نشاط جديد":
         ]
         
         try:
-            # 🚀 تحسين الأداء: استخدام append_row مباشرة بدلاً من مسح وإعادة رفع الجدول بالكامل
             sheet.append_row(row_to_append)
-            st.cache_data.clear() # تفريغ الكاش الموضعي لجلب المدخل الجديد فوراً
+            st.cache_data.clear() 
             st.session_state.db = load_data()
             st.session_state.elapsed_time = 0
-            st.toast(f"✅ تم حفظ السطر الجديد مباشرة في Google Sheet بنجاح!", icon="🚀")
+            st.session_state.duration_input = 1.0 # تصفير حقل المدة بعد الحفظ الناجح
+            st.toast(f"✅ تم حفظ النشاط مباشرة وبنجاح!", icon="🚀")
             st.rerun()
         except Exception as e:
-            st.error(f"فشل الحفظ المباشر، جاري الحفظ الاحتياطي: {e}")
+            st.error(f"فشل الحفظ: {e}")
 
     if not df_db.empty:
         st.markdown("---")
@@ -294,14 +290,12 @@ if page == "📥 تسجيل نشاط جديد":
                 st.toast("تم حذف الأنشطة المحددة بنجاح!", icon="🗑️")
                 st.rerun()
 
-
 # ==========================================
 # 2. صفحة لوحة التحكم والإحصاءات (Lazy Evaluation)
 # ==========================================
 elif page == "📊 لوحة التحكم والإحصاءات":
     st.header("📊 لوحة التحكم والأداء العام")
     
-    # ⚙️ تحسين الأداء: معالجة وتحويل البيانات والإحصاءات تتم هنا فقط عند فتح الصفحة
     if not df_db.empty:
         df_db_calc_base = df_db.copy()
         df_db_calc_base['تاريخ_صحيح'] = pd.to_datetime(df_db_calc_base['التاريخ'], errors='coerce')
@@ -315,7 +309,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
         df_db_calc_base['الملاحظات'] = pd.Series(dtype='str')
         df_db_calc_base["date_only"] = pd.Series(dtype='object')
 
-    # حساب السلاسل الالتزامية (Streaks) الكلية
     current_streak = 0
     best_streak = 0
     activities_count = len(df_db_calc_base)
@@ -343,7 +336,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
             best = max(best, temp)
         best_streak = best
 
-    # نظام الفلاتر المتقدمة
     st.markdown("### 🔍 نظام التصفية والفلترة المتقدم للرسوم البيانية")
     f_col1, f_col2 = st.columns(2)
     
@@ -355,7 +347,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
     with f_col2:
         f_month = st.selectbox("📅 فلترة حسب الشهر المطلوب الاستعلام عنه:", month_options)
         
-    # تطبيق الفلترة التفاعلية ديناميكياً
     df_db_calc = df_db_calc_base.copy()
     if f_activity != "الكل":
         df_db_calc = df_db_calc[df_db_calc['النشاط'] == f_activity]
