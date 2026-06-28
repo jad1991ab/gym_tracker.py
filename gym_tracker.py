@@ -14,6 +14,20 @@ from datetime import timedelta
 # إعدادات الصفحة الرسمية والتصميم
 st.set_page_config(page_title="متابع الأنشطة الاحترافي", layout="wide", page_icon="🟢")
 
+# ==========================================
+# ⚙️ تهيئة الـ Session State (قبل بناء أي ويدجت)
+# ==========================================
+if "duration_input" not in st.session_state:
+    st.session_state.duration_input = 1.0
+
+if "stopwatch_running" not in st.session_state:
+    st.session_state.stopwatch_running = False
+    st.session_state.stopwatch_start = None
+    st.session_state.elapsed_time = 0
+
+def set_duration(amount):
+    st.session_state.duration_input = float(amount)
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -32,19 +46,24 @@ def get_sheet():
 
 sheet = get_sheet()
 
-# ✨ [تعديل]: إضافة عمود 'الملاحظات' للأعمدة الرسمية في الـ Google Sheet
+# الأعمدة الرسمية الشاملة لعمود الملاحظات الجديد
 COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق', 'الملاحظات']
 
 try:
+    # حل مشكلة تمديد حدود الأسطر والأعمدة لتفادي خطأ الـ grid limits (400)
+    current_cols_count = sheet.col_count
+    if current_cols_count < len(COLUMNS):
+        sheet.add_cols(len(COLUMNS) - current_cols_count)
+        
     first_row = sheet.row_values(1)
     if not first_row:
         sheet.append_row(COLUMNS)
     else:
-        # التأكد من وجود عمود الملاحظات في الملف الفعلي وتحديثه إن لم يكن موجوداً
         if 'الملاحظات' not in first_row:
+            # تعديل آمن لعنوان العمود الأخير
             sheet.update_cell(1, len(COLUMNS), 'الملاحظات')
 except Exception as e:
-    st.error(f"خطأ في الاتصال بقاعدة البيانات: {e}")
+    st.error(f"تنبيه قاعدة البيانات: {e}")
 
 @st.cache_data(ttl=600)
 def load_data():
@@ -55,19 +74,21 @@ def load_data():
         df = pd.DataFrame(records)
         if 'المدة_بالدقائق' not in df.columns:
             df['المدة_بالدقائق'] = 60
-        # ✨ تأمين قراءة عمود الملاحظات الجديد
         if 'الملاحظات' not in df.columns:
             df['الملاحظات'] = ""
         existing_cols = [c for c in COLUMNS if c in df.columns]
         return df[existing_cols]
     except Exception as e:
-        st.error(f"خطأ أثناء قراءة Google Sheet: {e}")
+        st.error(f"خطأ أثناء قراءة البيانات: {e}")
         return pd.DataFrame(columns=COLUMNS)
 
 def save_data(df):
     try:
         clean_df = df[[c for c in COLUMNS if c in df.columns]].copy()
         sheet.clear()
+        # تمديد حجم جدول البيانات تلقائياً قبل الرفع للتأمين التام
+        if sheet.row_count < len(clean_df) + 10:
+            sheet.add_rows(len(clean_df) + 20)
         set_with_dataframe(sheet, clean_df, include_index=False, include_column_header=True, resize=True)
         st.cache_data.clear()
     except Exception as e:
@@ -78,25 +99,12 @@ if 'db' not in st.session_state:
 
 df_db = st.session_state.db
 
-# تجهيز متغيرات الوقت للحسابات
+# تجهيز متغيرات الحسابات والتواريخ
 now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
 current_year = now.year
 
-# تهيئة قيمة حقل الإدخال وساعة الإيقاف في الـ Session State
-if "duration_input" not in st.session_state:
-    st.session_state.duration_input = 1.0
-
-if "stopwatch_running" not in st.session_state:
-    st.session_state.stopwatch_running = False
-    st.session_state.stopwatch_start = None
-    st.session_state.elapsed_time = 0
-
-# دالة الـ Callback لتغيير قيمة الوقت بأمان عند الضغط على الأزرار السريعة
-def set_duration(amount):
-    st.session_state.duration_input = float(amount)
-
-# معالجة البيانات للإحصائيات والرسومات
+# تجهيز البيانات للإحصائيات والرسومات البيانية
 if not df_db.empty:
     df_db_calc = df_db.copy()
     df_db_calc['تاريخ_صحيح'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
@@ -108,15 +116,12 @@ else:
     df_db_calc['تاريخ_يومي_مختصر'] = pd.Series(dtype='str')
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
-
 # ==========================================
-# 🧭 نظام القوائم والتنقل الجانبي
+# 🧭 نظام القوائم والتنقل الجانبي لترتيب الواجهة
 # ==========================================
 st.sidebar.title("🧭 قائمة التنقل")
 page = st.sidebar.radio("اختر الصفحة:", ["📥 تسجيل نشاط جديد", "📊 لوحة التحكم والإحصاءات"])
 
-
-# ✨ دالة مساعدة لإنشاء حقول وأزرار الوقت بشكل مدمج (بجانب الحقل وموفر للمساحة)
 def render_duration_section(col_context):
     with col_context:
         st.number_input("مدة النشاط (بالساعات)", min_value=0.1, max_value=24.0, step=0.1, key="duration_input")
@@ -127,14 +132,13 @@ def render_duration_section(col_context):
         b3.button("⏱️ 1.5 س", key="b15", on_click=set_duration, args=(1.5,), use_container_width=True)
         b4.button("⏱️ 2 س", key="b2h", on_click=set_duration, args=(2.0,), use_container_width=True)
 
-
 # ==========================================
 # 1. صفحة: تسجيل نشاط جديد
 # ==========================================
 if page == "📥 تسجيل نشاط جديد":
     st.header("🟢 تسجيل ومتابعة الأنشطة")
     
-    # قسم ساعة الإيقاف الحيّة والذكية
+    # قسم ساعة الإيقاف الحيّة والذكية والموفرة للـ Quota
     st.markdown("### ⏱️ ساعة الإيقاف والتركيز الحي")
     stop_col1, stop_col2 = st.columns([2, 1])
     
@@ -172,7 +176,7 @@ if page == "📥 تسجيل نشاط جديد":
                     st.rerun()
 
     st.markdown("---")
-    st.subheader("📥 نموذج البيانات الذكي")
+    st.subheader("📥 نموذج البيانات والملء الذكي")
     auto_time = st.toggle("التسجيل التلقائي بالوقت والتاريخ الحالي فوراً ⚡", value=True)
 
     default_activities = ["النادي 🏋️‍♂️", "الدراسة 📚", "العمل 💼"]
@@ -189,24 +193,21 @@ if page == "📥 تسجيل نشاط جديد":
     target_date = now.date()
     chosen_time_str = now.strftime('%H:%M')
 
-    # ✨ [تحسين واجهة]: إخفاء حقول التاريخ والوقت الزائدة تلقائياً عند التفعيل الذكي لتسريع الإدخال وعرض حقل الملاحظات الجديد
     if auto_time:
         c1, c2 = st.columns(2)
         with c1:
-            selected_activity = st.selectbox("النشاط", activities_list, key="activity_auto")
+            selected_activity = st.selectbox("النشاط", activities_list, key="act_auto")
             if selected_activity == "➕ إضافة نشاط مخصص...":
-                custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="custom_auto")
-            # ✨ إضافة حقل ملاحظات اختياري ومريح
-            activity_notes = st.text_input("✍️ ملاحظات سريعة على النشاط (اختياري):", placeholder="مثال: تمرين أرجل، تصفح المراجعة النهائية", key="notes_auto")
+                custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="cust_auto")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أرجل، إنهاء الفصل الثالث", key="notes_auto")
         render_duration_section(c2)
     else:
         c1, c2, c3 = st.columns([2, 1.5, 1.5])
         with c1:
-            selected_activity = st.selectbox("النشاط", activities_list, key="activity_manual")
+            selected_activity = st.selectbox("النشاط", activities_list, key="act_manual")
             if selected_activity == "➕ إضافة نشاط مخصص...":
-                custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="custom_manual")
-            # ✨ حقل الملاحظات في الوضع اليدوي
-            activity_notes = st.text_input("✍️ ملاحظات سريعة على النشاط (اختياري):", placeholder="مثال: مراجعة شيفرة التطبيق", key="notes_manual")
+                custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="cust_manual")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: مراجعة كاملة للمشروع", key="notes_manual")
         render_duration_section(c1)
         with c2:
             target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
@@ -247,7 +248,6 @@ if page == "📥 تسجيل نشاط جديد":
         combined_datetime = datetime.datetime.combine(target_date, target_time)
         duration_minutes = int(st.session_state.duration_input * 60)
         
-        # ✨ تجميع السطر البرمي متضمناً الملاحظات
         new_row = {
             'ID': int(datetime.datetime.now().timestamp() * 1000),
             'التاريخ': combined_datetime.strftime('%Y-%m-%d %H:%M:%S'),
@@ -267,7 +267,7 @@ if page == "📥 تسجيل نشاط جديد":
         st.toast(f"✅ تم تسجيل نشاط ({final_activity}) بنجاح!", icon="🔥")
         st.rerun()
 
-    # سجل التحكم والحذف والتصدير مع عرض الملاحظات
+    # سجل التحكم والحذف الفوري والتصدير
     if not df_db.empty:
         st.markdown("---")
         st.subheader("📋 سجل التحكم بالبيانات وحذف الأسطر")
@@ -301,12 +301,12 @@ if page == "📥 تسجيل نشاط جديد":
             writer.sheets['الأنشطة اليومية'].views.sheetView[0].showGridLines = True
             writer.sheets['الأنشطة اليومية'].sheet_view.rightToLeft = True 
 
-        st.download_button(label="📥 تحميل سجل تمارينك كملف Excel التفاعلي", data=buffer.getvalue(), file_name="my_gym_activities.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
+        st.download_button(label="📥 تحميل سجل تمارينك كملف Excel النظيف", data=buffer.getvalue(), file_name="my_gym_activities.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
         
         st.markdown("---")
         if st.button("🚨 مسح السجل بالكامل والبدء من جديد"):
             sheet.clear()
-            sheet.append_row(COLUMNS)
+            sheet.append_row(COLUMNS[:9]) # إعادة التصفير الأساسي للأعمدة القديمة للتوافق
             st.cache_data.clear()
             st.session_state.db = pd.DataFrame(columns=COLUMNS)
             st.success("تم تصفير قاعدة البيانات بنجاح!")
