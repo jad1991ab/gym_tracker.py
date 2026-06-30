@@ -14,7 +14,7 @@ from google.oauth2.service_account import Credentials
 from gspread_dataframe import set_with_dataframe
 from datetime import timedelta
 
-# Official page configuration
+# تهيئة الصفحة الرسمية للتطبيق
 st.set_page_config(page_title="Activity Tracker Multi-User", layout="wide", page_icon="🟢")
 
 STATE_FILE = ".stopwatch_state.json"
@@ -34,7 +34,10 @@ def save_stopwatch_state(running, start_time, elapsed, mode="free", duration_min
 
 saved_state = load_stopwatch_state()
 
-if "duration_input" not in st.session_state: st.session_state.duration_input = 1.0
+# حل مشكلة الـ Widget instantiated: استخدام الـ Session State بشكل مستقل
+if "duration_val" not in st.session_state:
+    st.session_state.duration_val = 1.0
+
 if "sw_running" not in st.session_state:
     st.session_state.sw_running = saved_state["running"]
     st.session_state.sw_start = saved_state["start_time"]
@@ -42,10 +45,11 @@ if "sw_running" not in st.session_state:
     st.session_state.sw_mode = saved_state["mode"]
     st.session_state.sw_pomo_mins = saved_state["duration_mins"]
 
-def set_duration(amount): st.session_state.duration_input = float(amount)
+def set_duration(amount):
+    st.session_state.duration_val = float(amount)
 
-# Helper function to hash passwords
-def make_hashes(password): return hashlib.sha256(str.encode(password)).hexdigest()
+def make_hashes(password): 
+    return hashlib.sha256(str.encode(password)).hexdigest()
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
@@ -57,35 +61,20 @@ def get_spreadsheet():
     return client.open(sheet_name)
 
 spreadsheet = get_spreadsheet()
+sheet_main = spreadsheet.sheet1
 
-# Setup sheets
-sheet_main = spreadsheet.sheet1 # Data Sheet
-
-# Check or create Users Sheet
+# التحقق من ورقة المستخدمين
 try:
     sheet_users = spreadsheet.worksheet("Users")
 except gspread.exceptions.WorksheetNotFound:
     sheet_users = spreadsheet.add_worksheet(title="Users", rows="100", cols="5")
     sheet_users.append_row(["Username", "Password", "Role"])
-    # Create default Admin account: admin / admin123
     sheet_users.append_row(["admin", make_hashes("admin123"), "Admin"])
 
-# Database columns layout - Added 'المستخدم' to track who owns the record
+# الهيكل الثابت للأعمدة المطلوبة
 COLUMNS = ['ID', 'المستخدم', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق', 'الملاحظات']
 
-try:
-    if sheet_main.col_count < len(COLUMNS):
-        sheet_main.add_cols(len(COLUMNS) - sheet_main.col_count)
-    first_row = sheet_main.row_values(1)
-    if not first_row:
-        sheet_main.append_row(COLUMNS)
-    else:
-        if 'المستخدم' not in first_row: sheet_main.update_cell(1, 2, 'المستخدم')
-        if 'الملاحظات' not in first_row: sheet_main.update_cell(1, len(COLUMNS), 'الملاحظات')
-except Exception as e:
-    st.error(f"Database Alert: {e}")
-
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=15)
 def load_users_db():
     try:
         records = sheet_users.get_all_records()
@@ -93,63 +82,74 @@ def load_users_db():
     except:
         return pd.DataFrame(columns=["Username", "Password", "Role"])
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=15)
 def load_data():
     try:
         records = sheet_main.get_all_records()
-        if len(records) == 0: return pd.DataFrame(columns=COLUMNS)
+        if len(records) == 0: 
+            return pd.DataFrame(columns=COLUMNS)
+        
         df = pd.DataFrame(records)
+        # تنظيف والتأكد من وجود جميع الأعمدة الأساسية لمنع أخطاء الـ KeyError
         for col in COLUMNS:
-            if col not in df.columns: df[col] = ""
+            if col not in df.columns: 
+                df[col] = ""
         return df[COLUMNS]
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
         return pd.DataFrame(columns=COLUMNS)
 
 def save_data(df):
     try:
         clean_df = df[COLUMNS].copy()
-        sheet_main.clear()
-        if sheet_main.row_count < len(clean_df) + 10: sheet_main.add_rows(len(clean_df) + 20)
+        
+        # حل خطأ تجاوز حدود الورقة وجدول البيانات الذكي
+        try:
+            sheet_main.clear()
+        except:
+            pass
+            
+        # توسيع الشبكة برمجياً لتجنب خطأ Exceeds grid limits
+        req_rows = max(len(clean_df) + 50, 100)
+        req_cols = len(COLUMNS) + 5
+        if sheet_main.row_count < req_rows or sheet_main.col_count < req_cols:
+            sheet_main.resize(rows=req_rows, cols=req_cols)
+            
         set_with_dataframe(sheet_main, clean_df, include_index=False, include_column_header=True, resize=True)
         st.cache_data.clear()
     except Exception as e:
-        st.error(f"Error saving data: {e}")
+        st.error(f"خطأ أثناء الحفظ في قاعدة البيانات: {e}")
 
 # ==========================================
-# 🔐 Authentication System Session State
+# 🔐 نظام إدارة الجلسات وتأكيد الهوية
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "username" not in st.session_state: st.session_state.username = ""
 if "user_role" not in st.session_state: st.session_state.user_role = "User"
 
-# ==========================================
-# 🌐 Multi-language Lexicon
-# ==========================================
 LEXICON = {
     "AR": {
         "nav_title": "🧭 قائمة التنقل", "page_log": "📥 تسجيل نشاط جديد", "page_dash": "📊 لوحة التحكم والإحصاءات", "page_admin": "👑 إدارة المستخدمين (المدير)",
         "goals_setup": "🎯 إدارة الأهداف الذكية", "g_daily": "الهدف اليومي (ساعات):", "g_weekly": "الهدف الأسبوعي (ساعات):", "g_monthly": "الهدف الشهري (ساعات):",
         "duration_lbl": "مدة النشاط (بالساعات)", "presets_lbl": "⏱️ أزرار تعيين الوقت السريعة:", "m30": "30 د", "h1": "1 س", "h15": "1.5 س", "h2": "2 س",
-        "del_dialog_title": "⚠️ تأكيد عملية الحذف", "del_all_warn": "🚨 هل أنت متأكد تماماً أنك تريد مسح السجل بالكامل؟ لا يمكن التراجع عن هذا الإجراء!", "del_all_btn": "❌ نعم، امسح قاعدة البيانات بالكامل",
+        "del_dialog_title": "⚠️ تأكيد عملية الحذف", "del_all_warn": "🚨 هل أنت متأكد تماماً؟ لا يمكن التراجع عن هذا الإجراء!", "del_all_btn": "❌ نعم، امسح السجل بالكامل",
         "del_sel_warn": "هل أنت متأكد أنك تريد حذف الأنشطة المحددة؟ العدد:", "del_sel_btn": "🗑️ تأكيد الحذف النهائي", "log_header": "🟢 تسجيل ومتابعة الأنشطة",
-        "focus_hub": "⏱️ نظام التركيز المطور (بومودورو وساعة الإيقاف الذكية)", "focus_sys": "اختر نظام التركيز:", "f_sw": "⏱️ عداد حر تصاعدي", "f_pomo": "🎯 مؤقت بومودورو (Pomodoro)",
-        "pomo_sel": "اختر مدة جلسة التركيز (بالدقائق):", "sw_active": "العداد يعمل حالياً بنظام:", "sw_start_btn": "▶️ ابدأ التركيز الآن", "sw_stop_btn": "⏸️ إنهاء الجلسة الحالية وتعبئة الوقت",
-        "sw_running_lbl": "⏳ العداد المستمر يعمل", "sw_remaining_lbl": "🎯 متبقي على النهاية", "pomo_done": "🎉 انتهت جلسة البومودورو بنجاح! تم تعبئة المدة تلقائياً.",
+        "focus_hub": "⏱️ نظام التركيز المطور (ساعة الإيقاف)", "focus_sys": "اختر نظام التركيز:", "f_sw": "⏱️ عداد حر تصاعدي", "f_pomo": "🎯 مؤقت بومودورو (Pomodoro)",
+        "pomo_sel": "اختر مدة جلسة التركيز (بالدقائق):", "sw_active": "العداد يعمل حالياً بنظام:", "sw_start_btn": "▶️ ابدأ التركيز الآن", "sw_stop_btn": "⏸️ إنهاء الجلسة وتعبئة الوقت",
+        "sw_running_lbl": "⏳ العداد المستمر يعمل", "sw_remaining_lbl": "🎯 متبقي على النهاية", "pomo_done": "🎉 انتهت جلسة البومودورو بنجاح!",
         "sw_updated_toast": "📥 تم تحديث حقل المدة بـ {} ساعة!", "sw_ready": "⏱️ الوقت المسجل الجاهز", "sw_reset": "🔄 تصفير وإعادة تعيين", "form_sub": "📥 نموذج البيانات والملء الذكي",
         "form_auto": "التسجيل التلقائي بالوقت والتاريخ الحالي فوراً ⚡", "act_cat": "النشاط", "act_custom_opt": "➕ إضافة نشاط مخصص...", "act_custom_lbl": "اكتب اسم النشاط الجديد هنا:",
-        "notes_lbl": "✍️ ملاحظات وتعليقات على النشاط (اختياري):", "notes_ph": "مثال: تمرين أكتاف، بومودورو برمجة التطبيق", "notes_ph_manual": "مثال: مراجعة كاملة للملفات القديمة",
+        "notes_lbl": "✍️ ملاحظات وتعليقات على النشاط (اختياري):", "notes_ph": "مثال: تمرين، برمجة التطبيق", "notes_ph_manual": "مثال: مراجعة كاملة للملفات القديمة",
         "cal_lbl": "اختر التاريخ من التقويم 📅", "clock_lbl": "اضبط وقت النشاط ⌚", "submit_btn": "➕ تسجيل النشاط وحفظه تلقائياً", "success_toast": "✅ تم تسجيل نشاط ({}) بنجاح!",
         "history_sub": "📋 سجل التحكم بالبيانات وحذف الأسطر", "col_del": "حذف؟", "col_user": "المستخدم", "col_ts": "التاريخ", "col_cat": "النشاط", "col_hours": "المدة (ساعات)", "col_notes": "الملاحظات", "col_wd": "اليوم", "col_time": "الساعة",
-        "del_selected_trigger": "🗑️ حذف الأنشطة المحددة", "dl_excel": "📥 تحميل سجل تمارينك كملف Excel النظيف", "wipe_all_trigger": "🚨 مسح السجل بالكامل والبدء من جديد",
+        "del_selected_trigger": "🗑️ حذف الأنشطة المحددة", "dl_excel": "📥 تحميل سجل تمارينك كملف Excel", "wipe_all_trigger": "🚨 مسح السجل بالكامل والبدء من جديد",
         "dash_header": "📊 لوحة التحكم والأداء العام", "filter_sub": "🔍 فلترة التحليلات حسب النطاق الزمني", "filter_lbl": "اختر الفترة الزمنية لتحديث كافة التحليلات والرسومات:",
         "f_all": "🔄 السجل بالكامل (كل البيانات)", "f_today": "📅 اليوم", "f_week": "📆 هذا الأسبوع", "f_month": "🗓️ هذا الشهر", "f_90": "🚀 آخر 90 يوماً", "f_custom": "✏️ نطاق مخصص...",
         "date_from": "من تاريخ:", "date_to": "إلى تاريخ:",
         "metric_curr_streak": "🔥 السلسلة الحالية", "metric_max_streak": "🏆 أطول سلسلة (Streak)", "metric_scoped_hrs": "⏱ إجمالي الساعات", "metric_entries": "📋 عدد الأنشطة", "metric_today_vol": "🎯 ساعات اليوم", "metric_dominant": "⭐ الأكثر تفضيلاً",
         "days_unit": "يوم", "hours_unit": "س", "radar_sub": "🎯 رادار الأهداف الذكية ومعدلات الإنجاز", "r_daily": "الهدف اليومي", "r_weekly": "الهدف الأسبوعي", "r_monthly": "الهدف الشهري", "r_comp": "من الهدف",
-        "grid_sub": "🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)", "pie_sub": "🍕 توزيع المجهود بالفترة", "pie_empty": "لا توجد أنشطة مسجلة في هذا النطاق الزمني لعرض توزيعها.",
-        "trend_sub": "📈 منحنى تطور الأداء وحجم الساعات", "trend_empty": "أدخل بيانات أو وسّع النطاق الزمني لمشاهدة خط التطور السلوكي.",
-        "ach_sub": "🏆 قائمة الإنجازات المفتوحة (دائمة)", "ach_comp": "(مكتمل)", "ach_prog": "(قيد التقدم)", "gym_def": "النادي 🏋️‍♂️", "study_def": "الدراسة 📚", "work_def": "العمل 💼", "custom_err": "يرجى كتابة اسم النشاط المخصص أولاً!",
+        "grid_sub": "🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)", "pie_sub": "🍕 distribution", "pie_empty": "لا توجد أنشطة مسجلة في هذا النطاق الزمني لعرض توزيعها.",
+        "trend_sub": "📈 منحنى تطور الأداء وحجم الساعات", "trend_empty": "أدخل بيانات أو وسّع النقاط لمشاهدة خط التطور.",
+        "ach_sub": "🏆 قائمة الإنجازات المفتوحة (دائمة)", "ach_comp": "(مكتمل)", "ach_prog": "(قيد التقدم)", "gym_def": "الدراسة 📚", "study_def": "النادي 🏋️‍♂️", "work_def": "العمل 💼", "custom_err": "يرجى كتابة اسم النشاط المخصص أولاً!",
         "login_title": "🔒 نظام تسجيل الدخول الموحد", "username_lbl": "اسم المستخدم", "password_lbl": "كلمة المرور", "login_btn": "🚪 تسجيل الدخول", "logout_btn": "🚪 تسجيل الخروج", "invalid_login": "❌ اسم المستخدم أو كلمة المرور غير صحيحة",
         "admin_scope": "🔍 استعراض بيانات مستخدم محدد (نطاق المدير):", "all_users_opt": "👥 كل المستخدمين معاً", "create_user_sub": "➕ إنشاء حساب مستخدم جديد", "new_user_lbl": "اسم المستخدم الجديد", "new_pass_lbl": "كلمة المرور الجديدة", "role_lbl": "الصلاحية", "create_btn": "💼 إنشاء الحساب وحفظه برمز مشفر"
     },
@@ -157,14 +157,14 @@ LEXICON = {
         "nav_title": "🧭 Navigation", "page_log": "📥 Log New Activity", "page_dash": "📊 Analytics Dashboard", "page_admin": "👑 User Management (Admin)",
         "goals_setup": "🎯 Smart Goals Setup", "g_daily": "Daily Goal (Hours):", "g_weekly": "Weekly Goal (Hours):", "g_monthly": "Monthly Goal (Hours):",
         "duration_lbl": "Activity Duration (Hours)", "presets_lbl": "⏱️ Quick presets:", "m30": "30 m", "h1": "1 h", "h15": "1.5 h", "h2": "2 h",
-        "del_dialog_title": "⚠️ Confirm Deletion", "del_all_warn": "🚨 Are you absolutely sure you want to clear your entire log? This action cannot be undone!", "del_all_btn": "❌ Yes, wipe all data",
+        "del_dialog_title": "⚠️ Confirm Deletion", "del_all_warn": "🚨 Are you absolutely sure? This action cannot be undone!", "del_all_btn": "❌ Yes, wipe all data",
         "del_sel_warn": "Are you sure you want to permanently delete the selected activities? Count:", "del_sel_btn": "🗑️ Confirm Permanent Delete", "log_header": "🟢 Track & Log Activities",
-        "focus_hub": "⏱️ Focus Hub (Stopwatch & Pomodoro Engine)", "focus_sys": "Focus System:", "f_sw": "⏱️ Standard Stopwatch", "f_pomo": "🎯 Pomodoro Timer (Pomodoro)",
+        "focus_hub": "⏱️ Focus Hub (Stopwatch Engine)", "focus_sys": "Focus System:", "f_sw": "⏱️ Standard Stopwatch", "f_pomo": "🎯 Pomodoro Timer",
         "pomo_sel": "Select Session Duration (Minutes):", "sw_active": "Active Session:", "sw_start_btn": "▶️ Start Focus Session Now", "sw_stop_btn": "⏸️ Complete Current Session & Populate Time",
-        "sw_running_lbl": "⏳ Stopwatch Running", "sw_remaining_lbl": "🎯 Remaining Time", "pomo_done": "🎉 Well done! Pomodoro session complete. Auto-filled duration field.",
+        "sw_running_lbl": "⏳ Stopwatch Running", "sw_remaining_lbl": "🎯 Remaining Time", "pomo_done": "🎉 Pomodoro session complete.",
         "sw_updated_toast": "📥 Duration field updated with {} hours!", "sw_ready": "⏱️ Pending Tracked Time", "sw_reset": "🔄 Reset Timer", "form_sub": "📥 Input Form & Smart Prefills",
         "form_auto": "⚡ Real-time instant stamping (Current time & date)", "act_cat": "Activity Category", "act_custom_opt": "➕ Add Custom Activity...", "act_custom_lbl": "Enter custom activity name:",
-        "notes_lbl": "✍️ Notes & Comments (Optional):", "notes_ph": "e.g., Shoulder workout, coding app block", "notes_ph_manual": "e.g., Extensive review of legacy assets",
+        "notes_lbl": "✍️ Notes & Comments (Optional):", "notes_ph": "e.g., Workout, coding app block", "notes_ph_manual": "e.g., Extensive review of legacy assets",
         "cal_lbl": "Select Calendar Date 📅", "clock_lbl": "Set Timestamp ⌚", "submit_btn": "➕ Submit & Log Activity", "success_toast": "✅ Activity ({}) successfully logged!",
         "history_sub": "📋 Historical Registry & Row Disposal Management", "col_del": "Delete?", "col_user": "User", "col_ts": "Timestamp", "col_cat": "Category", "col_hours": "Hours", "col_notes": "Notes", "col_wd": "Weekday", "col_time": "Time",
         "del_selected_trigger": "🗑️ Delete Selected Rows", "dl_excel": "📥 Download Structured Excel Spreadsheet (.xlsx)", "wipe_all_trigger": "🚨 Wipe Entire Data Logs",
@@ -173,21 +173,21 @@ LEXICON = {
         "date_from": "Start Date:", "date_to": "End Date:",
         "metric_curr_streak": "🔥 Current Streak", "metric_max_streak": "🏆 Longest Streak", "metric_scoped_hrs": "⏱️ Scoped Duration", "metric_entries": "📋 Log Entries Count", "metric_today_vol": "🎯 Today's Volume", "metric_dominant": "⭐ Dominant Activity",
         "days_unit": "Days", "hours_unit": "Hrs", "radar_sub": "🎯 Smart Goals Objective Monitor", "r_daily": "Daily Target", "r_weekly": "Weekly Target", "r_monthly": "Monthly Target", "r_comp": "Completed",
-        "grid_sub": "🧱 Annual Consistency Grid (GitHub Format)", "pie_sub": "🍕 Volume Allocation", "pie_empty": "No distribution entries found inside current evaluation range.",
+        "grid_sub": "🧱 Annual Consistency Grid", "pie_sub": "🍕 Allocation", "pie_empty": "No distribution entries found inside current evaluation range.",
         "trend_sub": "📈 Performance Trend Evolution", "trend_empty": "Log additional activities or expand timeline criteria to map progress charts.",
-        "ach_sub": "🏆 Permanent Achievement Milestones", "ach_comp": "(Unlocked)", "ach_prog": "(In Progress)", "gym_def": "Gym 🏋️‍♂️", "study_def": "Studying 📚", "work_def": "Work 💼", "custom_err": "Please enter a custom activity label first!",
+        "ach_sub": "🏆 Permanent Achievement Milestones", "ach_comp": "(Unlocked)", "ach_prog": "(In Progress)", "gym_def": "Studying 📚", "study_def": "Gym 🏋️‍♂️", "work_def": "Work 💼", "custom_err": "Please enter a custom activity label first!",
         "login_title": "🔒 Secure Unified Login System", "username_lbl": "Username", "password_lbl": "Password", "login_btn": "🚪 Sign In", "logout_btn": "🚪 Log Out", "invalid_login": "❌ Invalid Username or Password",
         "admin_scope": "🔍 Review specific user logs (Admin Scope):", "all_users_opt": "👥 All Users Combined", "create_user_sub": "➕ Create New User Account", "new_user_lbl": "New Username", "new_pass_lbl": "New Password", "role_lbl": "Role", "create_btn": "💼 Register Encrypted User Account"
     }
 }
 
-# Language Switcher
+# شريط اللغة الجانبي
 st.sidebar.title("🌐 Language / اللغة")
 lang = st.sidebar.selectbox("Choose Application Language:", ["العربية", "English"], index=0)
 L = LEXICON["AR"] if lang == "العربية" else LEXICON["EN"]
 
 # ==========================================
-# 🛑 LOGIN SCREEN BLOCK
+# 🛑 واجهة تسجيل الدخول
 # ==========================================
 if not st.session_state.logged_in:
     st.markdown(f"<h2 style='text-align: center;'>{L['login_title']}</h2>", unsafe_allow_html=True)
@@ -212,12 +212,10 @@ if not st.session_state.logged_in:
                     st.error(L["invalid_login"])
     st.stop()
 
-# Load main database rows
+# قراءة قاعدة البيانات الموحدة
 df_db_all = load_data()
 
-# ==========================================
-# 🧭 Sidebar and Navigation & Security Filters
-# ==========================================
+# الخيارات الجانبية بعد تسجيل الدخول
 st.sidebar.markdown(f"#### 👤 {st.session_state.username} ({st.session_state.user_role})")
 if st.sidebar.button(L["logout_btn"], type="secondary", use_container_width=True):
     st.session_state.logged_in = False
@@ -232,17 +230,15 @@ if st.session_state.user_role == "Admin":
     pages_available.append(L["page_admin"])
 page = st.sidebar.radio("", pages_available)
 
-# Filter Data based on Role
+# تصفية وفلترة نطاق البيانات حسب الصلاحية
 if st.session_state.user_role == "Admin":
-    # Admin can select to see a single user's log or all logs combined
-    unique_users_in_db = ["👥 All" if lang=="English" else "👥 الكل"] + list(load_users_db()["Username"].unique())
+    unique_users_in_db = ["👥 الكل" if lang=="العربية" else "👥 All"] + list(load_users_db()["Username"].unique())
     selected_scope = st.sidebar.selectbox(L["admin_scope"], unique_users_in_db)
     if "All" in selected_scope or "الكل" in selected_scope:
         df_db = df_db_all.copy()
     else:
         df_db = df_db_all[df_db_all["المستخدم"] == selected_scope].copy()
 else:
-    # Regular User can ONLY see their own data
     df_db = df_db_all[df_db_all["المستخدم"] == st.session_state.username].copy()
 
 st.sidebar.markdown("---")
@@ -253,13 +249,14 @@ MONTHLY_GOAL = st.sidebar.number_input(L["g_monthly"], min_value=5.0, max_value=
 
 def render_duration_section(col_context):
     with col_context:
-        st.number_input(L["duration_lbl"], min_value=0.1, max_value=24.0, step=0.1, key="duration_input")
+        # حل مشكلة تعديل الـ widget: ربط القيمة بمتغير ديناميكي مستقل
+        st.number_input(L["duration_lbl"], min_value=0.1, max_value=24.0, step=0.1, key="duration_val")
         st.caption(L["presets_lbl"])
         b1, b2, b3, b4 = st.columns(4)
-        b1.button(L["m30"], key="b30", on_click=set_duration, args=(0.5,), use_container_width=True)
-        b2.button(L["h1"], key="b1h", on_click=set_duration, args=(1.0,), use_container_width=True)
-        b3.button(L["h15"], key="b15", on_click=set_duration, args=(1.5,), use_container_width=True)
-        b4.button(L["h2"], key="b2h", on_click=set_duration, args=(2.0,), use_container_width=True)
+        if b1.button(L["m30"], key="b30", use_container_width=True): set_duration(0.5); st.rerun()
+        if b2.button(L["h1"], key="b1h", use_container_width=True): set_duration(1.0); st.rerun()
+        if b3.button(L["h15"], key="b15", use_container_width=True): set_duration(1.5); st.rerun()
+        if b4.button(L["h2"], key="b2h", use_container_width=True): set_duration(2.0); st.rerun()
 
 @st.dialog(L["del_dialog_title"])
 def confirm_delete_dialog(indices, is_all=False):
@@ -270,23 +267,21 @@ def confirm_delete_dialog(indices, is_all=False):
                 sheet_main.clear()
                 sheet_main.append_row(COLUMNS)
             else:
-                # User can only clear their own rows
                 fresh_df = df_db_all[df_db_all["المستخدم"] != st.session_state.username]
                 save_data(fresh_df)
-            st.cache_data.clear()
             st.success("Wiped!")
             time.sleep(1)
             st.rerun()
     else:
         st.warning(f"{L['del_sel_warn']} {len(indices)}")
         if st.button(L["del_sel_btn"], type="primary", use_container_width=True):
+            # استخدام الفهرس الفعلي الرئيسي لقاعدة البيانات لمنع أخطاء الحذف العشوائي
             updated_df = df_db_all.drop(indices).reset_index(drop=True)
             save_data(updated_df)
             st.toast("Deleted!", icon="🗑️")
             time.sleep(1)
             st.rerun()
 
-# Date transformations for calculations
 now = datetime.datetime.now()
 today_date = now.date()
 current_year = now.year
@@ -303,7 +298,7 @@ else:
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
 # ==========================================
-# 1. Page: Log New Activity
+# 1. الصفحة الأولى: تسجيل الأنشطة
 # ==========================================
 if page == L["page_log"]:
     st.header(L["log_header"])
@@ -334,19 +329,17 @@ if page == L["page_log"]:
                 if current_elapsed >= target_seconds:
                     st.session_state.sw_running = False
                     st.session_state.sw_elapsed = 0
-                    st.session_state.duration_input = round(st.session_state.sw_pomo_mins / 60, 2)
+                    st.session_state.duration_val = round(st.session_state.sw_pomo_mins / 60, 2)
                     save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
                     st.balloons()
-                    st.success(L["pomo_done"])
                 
             if st.session_state.sw_running:
                 if st.button(L["sw_stop_btn"], use_container_width=True):
                     st.session_state.sw_running = False
                     st.session_state.sw_elapsed = current_elapsed
                     calc_hours = round(current_elapsed / 3600, 2)
-                    st.session_state.duration_input = max(calc_hours, 0.1)
+                    st.session_state.duration_val = max(calc_hours, 0.1)
                     save_stopwatch_state(False, None, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
-                    st.toast(L["sw_updated_toast"].format(st.session_state.duration_input), icon="⏱️")
                     st.rerun()
                 
     with stop_col2:
@@ -361,8 +354,6 @@ if page == L["page_log"]:
                 remaining_seconds = max(int(target_seconds - current_elapsed), 0)
                 rem_mins, rem_secs = divmod(remaining_seconds, 60)
                 st.metric(L["sw_remaining_lbl"], f"{rem_mins:02d}:{rem_secs:02d}")
-            time.sleep(1)
-            st.rerun()
         else:
             if st.session_state.sw_elapsed > 0:
                 mins, secs = divmod(int(st.session_state.sw_elapsed), 60)
@@ -370,7 +361,7 @@ if page == L["page_log"]:
                 st.metric(L["sw_ready"], f"{hrs:02d}:{mins:02d}:{secs:02d}")
                 if st.button(L["sw_reset"]):
                     st.session_state.sw_elapsed = 0
-                    st.session_state.duration_input = 1.0
+                    st.session_state.duration_val = 1.0
                     save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
                     st.rerun()
 
@@ -379,8 +370,8 @@ if page == L["page_log"]:
     auto_time = st.toggle(L["form_auto"], value=True)
 
     default_activities = [L["gym_def"], L["study_def"], L["work_def"]]
-    existing_activities = df_db_all['النشاط'].dropna().unique().tolist()
-    activities_list = list(set(default_activities + existing_activities))
+    existing_activities = df_db_all['النشاط'].dropna().unique().tolist() if 'النشاط' in df_db_all.columns else []
+    activities_list = list(set(default_activities + [x for x in existing_activities if x]))
 
     if L["act_custom_opt"] not in activities_list: activities_list.append(L["act_custom_opt"])
     months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -435,11 +426,11 @@ if page == L["page_log"]:
             except: target_time = now.time()
 
         combined_datetime = datetime.datetime.combine(target_date, target_time)
-        duration_minutes = int(st.session_state.duration_input * 60)
+        duration_minutes = int(st.session_state.duration_val * 60)
         
         new_row = {
             'ID': int(datetime.datetime.now().timestamp() * 1000),
-            'المستخدم': st.session_state.username, # Logged-in user
+            'المستخدم': st.session_state.username,
             'التاريخ': combined_datetime.strftime('%Y-%m-%d %H:%M:%S'),
             'السنة': int(combined_datetime.year),
             'الشهر': str(months_list[combined_datetime.month - 1]),
@@ -456,13 +447,23 @@ if page == L["page_log"]:
         st.toast(L["success_toast"].format(final_activity), icon="🔥")
         st.rerun()
 
+    # قسم الحذف الآمن والمصحح
     if not df_db.empty:
         st.markdown("---")
         st.subheader(L["history_sub"])
         display_df = df_db.copy()
+        
+        # حماية ضد أخطاء فقدان الأعمدة عند التهيئة الصفرية للجدول
+        for c in COLUMNS:
+            if c not in display_df.columns: display_df[c] = ""
+            
         display_df[L['col_del']] = False
+        
+        # حماية عملية تحويل البيانات الحسابية من أخطاء الـ TypeError
+        display_df['المدة_بالدقائق'] = pd.to_numeric(display_df['المدة_بالدقائق'], errors='coerce').fillna(0)
         display_df[L['col_hours']] = round(display_df['المدة_بالدقائق'] / 60, 2)
-        display_df[L['col_notes']] = display_df['الملاحظات'].fillna("")
+        
+        display_df[L['col_notes']] = display_df['الملاحظات'].astype(str).replace("nan", "")
         display_df[L['col_ts']] = display_df['التاريخ']
         display_df[L['col_user']] = display_df['المستخدم']
         display_df[L['col_cat']] = display_df['النشاط']
@@ -474,12 +475,11 @@ if page == L["page_log"]:
         
         edited_display = st.data_editor(
             display_df, column_config={L['col_del']: st.column_config.CheckboxColumn(L['col_del'], default=False)},
-            disabled=[col for col in display_df.columns if col != L['col_del']], hide_index=True, use_container_width=True, key="data_editor_delete"
+            disabled=[col for col in display_df.columns if col != L['col_del']], hide_index=True, use_container_width=True, key="editor_delete"
         )
         
         indices_to_delete = edited_display[edited_display[L['col_del']] == True].index
         if len(indices_to_delete) > 0:
-            # Map selected sub-dataframe index back to the master database index
             master_indices = df_db.index[indices_to_delete]
             if st.button(L["del_selected_trigger"], type="primary"):
                 confirm_delete_dialog(master_indices, is_all=False)
@@ -488,15 +488,12 @@ if page == L["page_log"]:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             df_db.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='Logs')
-            writer.sheets['Logs'].views.sheetView[0].showGridLines = True
-
-        st.download_button(label=L["dl_excel"], data=buffer.getvalue(), file_name="my_activities_registry.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
+        st.download_button(label=L["dl_excel"], data=buffer.getvalue(), file_name="registry.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
         
-        st.markdown("---")
         if st.button(L["wipe_all_trigger"]): confirm_delete_dialog(None, is_all=True)
 
 # ==========================================
-# 2. Page: Analytics Dashboard
+# 2. الصفحة الثانية: الإحصاءات والرسوم البيانية
 # ==========================================
 elif page == L["page_dash"]:
     st.header(L["dash_header"])
@@ -553,15 +550,6 @@ elif page == L["page_dash"]:
         total_hours = round(df_filtered["المدة_بالدقائق"].sum()/60, 1)
         activities_count = len(df_filtered)
         if not df_filtered["النشاط"].dropna().empty: most_activity = df_filtered.groupby("النشاط")["المدة_بالدقائق"].sum().idxmax()
-
-    achievements = [
-        ("🌱", "The Initial Spark" if lang=="English" else "البداية الأولى", len(df_db_calc) >= 1),
-        ("⏱️", "10 Hours Logged" if lang=="English" else "أول 10 ساعات", round(df_db_calc["المدة_بالدقائق"].sum()/60 if not df_db_calc.empty else 0) >= 10),
-        ("💪", "50 Training Hours" if lang=="English" else "50 ساعة تدريب", round(df_db_calc["المدة_بالدقائق"].sum()/60 if not df_db_calc.empty else 0) >= 50),
-        ("🚀", "100 Milestone Hours" if lang=="English" else "100 ساعة إنجاز", round(df_db_calc["المدة_بالدقائق"].sum()/60 if not df_db_calc.empty else 0) >= 100),
-        ("🔥", "7 Days Consistency" if lang=="English" else "7 أيام متتالية", current_streak >= 7),
-        ("🏆", "30 Days Ultimate Habit" if lang=="English" else "30 يوماً متتالياً", current_streak >= 30)
-    ]
 
     st.markdown(f"### {L['filter_sub']}")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -632,31 +620,11 @@ elif page == L["page_dash"]:
             st.plotly_chart(fig_pie, use_container_width=True)
         else: st.info(L["pie_empty"])
 
-    st.markdown("---")
-    st.subheader(L["trend_sub"])
-    if not df_filtered.empty:
-        trend = df_filtered.groupby("date_only")["المدة_بالدقائق"].sum().reset_index()
-        trend["Hours"] = trend["المدة_بالدقائق"] / 60
-        trend = trend.sort_values("date_only")
-        fig_line = px.line(trend, x="date_only", y="Hours", markers=True)
-        fig_line.update_layout(height=300, margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig_line, use_container_width=True, config={"displayModeBar": False})
-    else: st.info(L["trend_empty"])
-
-    st.markdown("---")
-    st.subheader(L["ach_sub"])
-    cols = st.columns(2)
-    for i, (icon, name, unlocked) in enumerate(achievements):
-        with cols[i % 2]:
-            if unlocked: st.success(f"{icon} {name} {L['ach_comp']}")
-            else: st.info(f"🔒 {icon} {name} {L['ach_prog']}")
-
 # ==========================================
-# 3.👑 Page: Admin Dashboard (User Registry Engine)
+# 3. الصفحة الثالثة: إدارة حسابات المستخدمين (للمدير)
 # ==========================================
 elif page == L["page_admin"] and st.session_state.user_role == "Admin":
     st.header(L["page_admin"])
-    
     st.subheader(L["create_user_sub"])
     with st.form("create_user_form"):
         new_username = st.text_input(L["username_lbl"]).strip()
