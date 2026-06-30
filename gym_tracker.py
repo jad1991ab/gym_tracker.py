@@ -41,7 +41,7 @@ def save_stopwatch_state(running, start_time, elapsed, mode="free", duration_min
     except:
         pass
 
-# تحميل الحالة المحفوظة سابقاً (مقاومة إغلاق المتصفح)
+# تحميل الحالة المحفوظة سابقاً
 saved_state = load_stopwatch_state()
 
 # ==========================================
@@ -54,7 +54,7 @@ if "sw_running" not in st.session_state:
     st.session_state.sw_running = saved_state["running"]
     st.session_state.sw_start = saved_state["start_time"]
     st.session_state.sw_elapsed = saved_state["elapsed"]
-    st.session_state.sw_mode = saved_state["mode"] # free أو pomodoro
+    st.session_state.sw_mode = saved_state["mode"]
     st.session_state.sw_pomo_mins = saved_state["duration_mins"]
 
 def set_duration(amount):
@@ -129,7 +129,7 @@ df_db = st.session_state.db
 
 # تجهيز متغيرات الحسابات والتواريخ
 now = datetime.datetime.now()
-today_str = now.strftime('%Y-%m-%d')
+today_date = now.date()
 current_year = now.year
 
 if not df_db.empty:
@@ -144,10 +144,16 @@ else:
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
 # ==========================================
-# 🧭 نظام القوائم والتنقل الجانبي
+# 🧭 نظام القوائم الجانبية المتقدمة (الأهداف الذكية)
 # ==========================================
 st.sidebar.title("🧭 قائمة التنقل")
 page = st.sidebar.radio("اختر الصفحة:", ["📥 تسجيل نشاط جديد", "📊 لوحة التحكم والإحصاءات"])
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎯 إدارة الأهداف الذكية")
+DAILY_GOAL = st.sidebar.number_input("الهدف اليومي (ساعات):", min_value=0.5, max_value=24.0, value=2.0, step=0.5)
+WEEKLY_GOAL = st.sidebar.number_input("الهدف الأسبوعي (ساعات):", min_value=1.0, max_value=168.0, value=14.0, step=1.0)
+MONTHLY_GOAL = st.sidebar.number_input("الهدف الشهري (ساعات):", min_value=5.0, max_value=744.0, value=60.0, step=5.0)
 
 def render_duration_section(col_context):
     with col_context:
@@ -165,10 +171,8 @@ def render_duration_section(col_context):
 if page == "📥 تسجيل نشاط جديد":
     st.header("🟢 تسجيل ومتابعة الأنشطة")
     
-    # ⏱️ قسم العدادات المطور (ساعة إيقاف مستمرة + مؤقت بومودورو ذكي)
     st.markdown("### ⏱️ نظام التركيز المطور (بومودورو وساعة الإيقاف الذكية)")
     
-    # نظام تبديل الأنماط (يظهر فقط إذا كان العداد متوقفاً)
     if not st.session_state.sw_running:
         mode_choice = st.radio("اختر نظام التركيز:", ["⏱️ عداد حر تصاعدي", "🎯 مؤقت بومودورو (Pomodoro)"], horizontal=True)
         st.session_state.sw_mode = "free" if "عداد حر" in mode_choice else "pomodoro"
@@ -188,52 +192,41 @@ if page == "📥 تسجيل نشاط جديد":
                 save_stopwatch_state(True, st.session_state.sw_start, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
                 st.rerun()
         else:
-            # حساب الوقت المنقضي
             current_elapsed = time.time() - st.session_state.sw_start
             
             if st.session_state.sw_mode == "pomodoro":
                 target_seconds = st.session_state.sw_pomo_mins * 60
-                # التحقق مما إذا انتهى وقت البومودورو تلقائياً
                 if current_elapsed >= target_seconds:
                     st.session_state.sw_running = False
                     st.session_state.sw_elapsed = 0
                     st.session_state.duration_input = round(st.session_state.sw_pomo_mins / 60, 2)
                     save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
                     st.balloons()
-                    st.audio("https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg") # صوت تنبيه جاهز
-                    st.success("🎉 أحسنت! انتهت جلسة البومودورو بنجاح. تم ملء الوقت بالأسفل تلقائياً وجاهز للحفظ.")
+                    st.audio("https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg")
+                    st.success("🎉 انتهت جلسة البومودورو بنجاح! تم تعبئة المدة بالأسفل تلقائياً.")
                 
             if st.session_state.sw_running:
                 if st.button("⏸️ إنهاء الجلسة الحالية وتعبئة الوقت المكتسب", use_container_width=True):
                     st.session_state.sw_running = False
                     st.session_state.sw_elapsed = current_elapsed
-                    
-                    if st.session_state.sw_mode == "free":
-                        calc_hours = round(current_elapsed / 3600, 2)
-                    else:
-                        calc_hours = round(current_elapsed / 3600, 2)
-                        
+                    calc_hours = round(current_elapsed / 3600, 2)
                     st.session_state.duration_input = max(calc_hours, 0.1)
                     save_stopwatch_state(False, None, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
-                    st.toast(f"📥 تم تحديث حقل المدة بالأسفل بـ {st.session_state.duration_input} ساعة!", icon="⏱️")
+                    st.toast(f"📥 تم تحديث حقل المدة بـ {st.session_state.duration_input} ساعة!", icon="⏱️")
                     st.rerun()
                 
     with stop_col2:
         if st.session_state.sw_running:
             current_elapsed = time.time() - st.session_state.sw_start
-            
             if st.session_state.sw_mode == "free":
-                # عداد تصاعدي
                 mins, secs = divmod(int(current_elapsed), 60)
                 hrs, mins = divmod(mins, 60)
                 st.metric("⏳ العداد المستمر يعمل", f"{hrs:02d}:{mins:02d}:{secs:02d}")
             else:
-                # بومودورو تنازلي
                 target_seconds = st.session_state.sw_pomo_mins * 60
                 remaining_seconds = max(int(target_seconds - current_elapsed), 0)
                 rem_mins, rem_secs = divmod(remaining_seconds, 60)
-                st.metric("🎯 متبقي على نهاية الجلسة", f"{rem_mins:02d}:{rem_secs:02d}")
-                
+                st.metric("🎯 متبقي على النهاية", f"{rem_mins:02d}:{rem_secs:02d}")
             time.sleep(1)
             st.rerun()
         else:
@@ -262,7 +255,7 @@ if page == "📥 تسجيل نشاط جديد":
         activities_list.append("➕ إضافة نشاط مخصص...")
     months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
-    target_date = now.date()
+    target_date = today_date
     chosen_time_str = now.strftime('%H:%M')
 
     if auto_time:
@@ -279,10 +272,10 @@ if page == "📥 تسجيل نشاط جديد":
             selected_activity = st.selectbox("النشاط", activities_list, key="act_manual")
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="cust_manual")
-            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: مراجعة شاملة للملفات القديمة", key="notes_manual")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: مراجعة كاملة للملفات القديمة", key="notes_manual")
         render_duration_section(c1)
         with c2:
-            target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
+            target_date = st.date_input("اختر التاريخ من التقويم 📅", value=today_date)
         with c3:
             clock_html = f"""
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; width: 100%;">
@@ -389,30 +382,56 @@ if page == "📥 تسجيل نشاط جديد":
 elif page == "📊 لوحة التحكم والإحصاءات":
     st.header("📊 لوحة التحكم والأداء العام")
     
-    DAILY_GOAL, WEEKLY_GOAL, MONTHLY_GOAL = 2, 14, 60     
-    current_streak, best_streak, today_hours, week_hours, month_hours, total_hours, activities_count = 0, 0, 0, 0, 0, 0, 0
+    # 🔍 ✨ [إضافة ميزة الفلترة المتقدمة للنطاقات الزمنية]
+    st.subheader("🔍 فلترة التحليلات حسب النطاق الزمني")
+    time_filter = st.selectbox(
+        "اختر الفترة الزمنية لتحديث كافة التحليلات والرسومات:",
+        ["🔄 السجل بالكامل (كل البيانات)", "📅 اليوم", "📆 هذا الأسبوع", "🗓️ هذا الشهر", "🚀 آخر 90 يوماً", "✏️ نطاق مخصص..."]
+    )
+    
+    # تحديد تواريخ البداية والنهاية بناء على الفلتر لتصفية قاعدة البيانات
+    start_filter_date = None
+    end_filter_date = today_date
+    
+    if time_filter == "📅 اليوم":
+        start_filter_date = today_date
+    elif time_filter == "📆 هذا الأسبوع":
+        start_filter_date = today_date - timedelta(days=today_date.weekday())
+    elif time_filter == "🗓️ هذا الشهر":
+        start_filter_date = datetime.date(today_date.year, today_date.month, 1)
+    elif time_filter == "🚀 آخر 90 يوماً":
+        start_filter_date = today_date - timedelta(days=90)
+    elif time_filter == "✏️ نطاق مخصص...":
+        c_date1, c_date2 = st.columns(2)
+        with c_date1:
+            start_filter_date = st.date_input("من تاريخ:", value=today_date - timedelta(days=7))
+        with c_date2:
+            end_filter_date = st.date_input("إلى تاريخ:", value=today_date)
+
+    # تطبيق الفلترة على نسخة الحسابات
+    if start_filter_date is not None and not df_db_calc.empty:
+        df_filtered = df_db_calc[(df_db_calc["date_only"] >= start_filter_date) & (df_db_calc["date_only"] <= end_filter_date)].copy()
+    else:
+        df_filtered = df_db_calc.copy()
+
+    # الحسابات الأساسية والإحصاءات الحيوية
+    current_streak, best_streak = 0, 0
+    today_hours, week_hours, month_hours, total_hours, activities_count = 0, 0, 0, 0, 0
     most_activity = "-"
 
+    # حساب الالتزام والسلاسل المتتالية (Streak) من كامل قاعدة البيانات لضمان دقتها دائماً
     if not df_db_calc.empty:
-        total_hours = round(df_db_calc["المدة_بالدقائق"].sum()/60, 1)
-        activities_count = len(df_db_calc)
-        if not df_db_calc["النشاط"].dropna().empty:
-            most_activity = df_db_calc.groupby("النشاط")["المدة_بالدقائق"].sum().idxmax()
-
-        today = datetime.date.today()
-        today_hours = round(df_db_calc[df_db_calc["date_only"] == today]["المدة_بالدقائق"].sum()/60, 1)
-        start_week = today - timedelta(days=today.weekday())
-        week_hours = round(df_db_calc[df_db_calc["date_only"] >= start_week]["المدة_بالدقائق"].sum()/60, 1)
-        month_hours = round(df_db_calc[(pd.to_datetime(df_db_calc["date_only"]).dt.month == today.month) & (pd.to_datetime(df_db_calc["date_only"]).dt.year == today.year)]["المدة_بالدقائق"].sum()/60, 1)
-
         unique_days = sorted(set(df_db_calc["date_only"].dropna()))
+        
+        # 1. حساب السلسلة الحالية
         streak = 0
-        check_day = today
+        check_day = today_date
         while check_day in unique_days:
             streak += 1
             check_day -= timedelta(days=1)
         current_streak = streak
 
+        # 2. ✨ [إضافة ميزة مؤشر أفضل وأطول سلسلة التزام متتالية - Longest Streak]
         best = 0
         temp = 1
         if len(unique_days) > 0:
@@ -425,49 +444,64 @@ elif page == "📊 لوحة التحكم والإحصاءات":
             best = max(best, temp)
         best_streak = best
 
+        # حساب الساعات الفعلية لمقارنتها بالأهداف
+        today_hours = round(df_db_calc[df_db_calc["date_only"] == today_date]["المدة_بالدقائق"].sum()/60, 1)
+        start_week = today_date - timedelta(days=today_date.weekday())
+        week_hours = round(df_db_calc[df_db_calc["date_only"] >= start_week]["المدة_بالدقائق"].sum()/60, 1)
+        month_hours = round(df_db_calc[(pd.to_datetime(df_db_calc["date_only"]).dt.month == today_date.month) & (pd.to_datetime(df_db_calc["date_only"]).dt.year == today_date.year)]["المدة_بالدقائق"].sum()/60, 1)
+
+    # حساب المؤشرات بناء على النطاق المفلتر المختار حالياً
+    if not df_filtered.empty:
+        total_hours = round(df_filtered["المدة_بالدقائق"].sum()/60, 1)
+        activities_count = len(df_filtered)
+        if not df_filtered["النشاط"].dropna().empty:
+            most_activity = df_filtered.groupby("النشاط")["المدة_بالدقائق"].sum().idxmax()
+
+    # نظام الإنجازات العام
     achievements = [
-        ("🌱", "البداية", activities_count >= 1),
-        ("⏱️", "أول 10 ساعات", total_hours >= 10),
-        ("💪", "50 ساعة", total_hours >= 50),
-        ("🚀", "100 ساعة", total_hours >= 100),
+        ("🌱", "البداية الأولى", len(df_db_calc) >= 1),
+        ("⏱️", "أول 10 ساعات", round(df_db_calc["المدة_بالدقائق"].sum()/60 if not df_db_calc.empty else 0) >= 10),
+        ("💪", "50 ساعة تدريب", round(df_db_calc["المدة_بالدقائق"].sum()/60 if not df_db_calc.empty else 0) >= 50),
+        ("🚀", "100 ساعة إنجاز", round(df_db_calc["المدة_بالدقائق"].sum()/60 if not df_db_calc.empty else 0) >= 100),
         ("🔥", "7 أيام متتالية", current_streak >= 7),
         ("🏆", "30 يوماً متتالياً", current_streak >= 30),
-        ("📋", "100 نشاط", activities_count >= 100)
+        ("📋", "100 نشاط مسجل", len(df_db_calc) >= 100)
     ]
 
-    c1,c2,c3,c4,c5,c6 = st.columns(6)
-    c1.metric("🔥 السلسلة", current_streak)
-    c2.metric("🏆 أفضل سلسلة", best_streak)
-    c3.metric("⏱ إجمالي الساعات", total_hours)
-    c4.metric("📋 الأنشطة", activities_count)
-    c5.metric("🎯 ساعات اليوم", today_hours)
-    c6.metric("⭐ النشاط المفضل", most_activity)
+    # عرض المؤشرات الرقمية
+    st.markdown("### 📈 مؤشرات الأداء للفترة المحددة")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("🔥 السلسلة الحالية", f"{current_streak} يوم")
+    c2.metric("🏆 أطول سلسلة (Streak)", f"{best_streak} يوم")
+    c3.metric("⏱ إجمالي الساعات", f"{total_hours} س")
+    c4.metric("📋 عدد الأنشطة", activities_count)
+    c5.metric("🎯 ساعات اليوم", f"{today_hours} س")
+    c6.metric("⭐ الأكثر تفضيلاً", most_activity)
 
     st.markdown("---")
-    st.subheader("🏆 الإنجازات المفتوحة")
-    cols = st.columns(2)
-    for i, (icon, name, unlocked) in enumerate(achievements):
-        with cols[i % 2]:
-            if unlocked: st.success(f"{icon} {name}")
-            else: st.info(f"🔒 {icon} {name}")
-
-    st.subheader("🎯 التقدم نحو الأهداف")
+    
+    # ✨ [إضافة نظام ومؤشرات الأهداف الذكية والنسب المئوية الدقيقة]
+    st.subheader("🎯 رادار الأهداف الذكية ومعدلات الإنجاز")
     goal1, goal2, goal3 = st.columns(3)
+    
     with goal1:
-        st.metric("🎯 الهدف اليومي", f"{today_hours:.1f}/{DAILY_GOAL} ساعة")
-        st.progress(min(today_hours / DAILY_GOAL, 1.0))
+        p_today = min(today_hours / DAILY_GOAL, 1.0)
+        st.metric("🎯 الهدف اليومي", f"{today_hours:.1f} / {DAILY_GOAL} ساعة", f"{p_today*100:.0f}% من الهدف")
+        st.progress(p_today)
     with goal2:
-        st.metric("📅 الهدف الأسبوعي", f"{week_hours:.1f}/{WEEKLY_GOAL} ساعة")
-        st.progress(min(week_hours / WEEKLY_GOAL, 1.0))
+        p_week = min(week_hours / WEEKLY_GOAL, 1.0)
+        st.metric("📅 الهدف الأسبوعي", f"{week_hours:.1f} / {WEEKLY_GOAL} ساعة", f"{p_week*100:.0f}% من الهدف")
+        st.progress(p_week)
     with goal3:
-        st.metric("🗓️ الهدف الشهري", f"{month_hours:.1f}/{MONTHLY_GOAL} ساعة")
-        st.progress(min(month_hours / MONTHLY_GOAL, 1.0))
+        p_month = min(month_hours / MONTHLY_GOAL, 1.0)
+        st.metric("🗓️ الهدف الشهري", f"{month_hours:.1f} / {MONTHLY_GOAL} ساعة", f"{p_month*100:.0f}% من الهدف")
+        st.progress(p_month)
 
     st.markdown("---")
     col_graph1, col_graph2 = st.columns([2,1])
         
     with col_graph1:
-        st.subheader("🧱 مخطط الالتزام السنوي (GitHub Grid)")
+        st.subheader("🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)")
         all_days = pd.date_range(start=datetime.date(current_year, 1, 1), end=datetime.date(current_year, 12, 31))
         df_year_grid = pd.DataFrame({'تاريخ_صحيح': all_days})
         df_year_grid['تاريخ_يومي_مختصر'] = df_year_grid['تاريخ_صحيح'].dt.strftime('%Y-%m-%d')
@@ -478,11 +512,13 @@ elif page == "📊 لوحة التحكم والإحصاءات":
         github_day_order = [6, 0, 1, 2, 3, 4, 5] 
         days_names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
-        if not df_db_calc.empty:
-            user_summary = df_db_calc.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum().reset_index()
+        # يعرض المخطط السنوي الأنشطة مع تسليط الضوء بناء على الفلترة الزمنية المختارة لتلوينها
+        if not df_filtered.empty:
+            user_summary = df_filtered.groupby('تاريخ_يومي_مختصر')['المدة_بالدقائق'].sum().reset_index()
             user_summary['الساعات'] = user_summary['المدة_بالدقائق'] / 60
             df_year_grid = pd.merge(df_year_grid, user_summary[['تاريخ_يومي_مختصر', 'الساعات']], on='تاريخ_يومي_مختصر', how='left').fillna(0)
-        else: df_year_grid['الساعات'] = 0.0
+        else:
+            df_year_grid['الساعات'] = 0.0
 
         weeks_indices = sorted(df_year_grid['الأسبوع_السنوي'].unique())
         z_matrix, text_matrix = [], []
@@ -495,8 +531,11 @@ elif page == "📊 لوحة التحكم والإحصاءات":
                     val = day_data['الساعات'].values[0]
                     row_z.append(val)
                     row_text.append(f"التاريخ: {day_data['تاريخ_يومي_مختصر'].values[0]}<br>الإنجاز: {val} ساعة")
-                else: row_z.append(0); row_text.append("")
-            z_matrix.append(row_z); text_matrix.append(row_text)
+                else:
+                    row_z.append(0)
+                    row_text.append("")
+            z_matrix.append(row_z)
+            text_matrix.append(row_text)
 
         fig_heatmap = go.Figure(data=go.Heatmap(
             z=z_matrix, x=weeks_indices, y=days_names, text=text_matrix, hoverinfo='text', xgap=1, ygap=1,
@@ -506,23 +545,34 @@ elif page == "📊 لوحة التحكم والإحصاءات":
         st.plotly_chart(fig_heatmap, use_container_width=True, config={"displayModeBar": False})
 
     with col_graph2:
-        st.subheader("🍕 توزيع المجهود")
-        if not df_db_calc.empty and df_db_calc['المدة_بالدقائق'].sum() > 0:
-            pie_data = df_db_calc.groupby('النشاط')['المدة_بالدقائق'].sum().reset_index()
+        st.subheader("🍕 توزيع المجهود بالفترة")
+        if not df_filtered.empty and df_filtered['المدة_بالدقائق'].sum() > 0:
+            pie_data = df_filtered.groupby('النشاط')['المدة_بالدقائق'].sum().reset_index()
             fig_pie = px.pie(pie_data, values='المدة_بالدقائق', names='النشاط', hole=0.4)
             fig_pie.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
             st.plotly_chart(fig_pie, use_container_width=True)
-        else: st.info("سيتوفر الرسم الدائري فور تسجيل الأنشطة.")
+        else:
+            st.info("لا توجد أنشطة مسجلة في هذا النطاق الزمني لعرض توزيعها.")
 
     st.markdown("---")
-    st.subheader("📈 تطور الأداء خلال آخر 30 يوماً")
-    if not df_db_calc.empty:
-        last30 = datetime.date.today() - datetime.timedelta(days=29)
-        trend = df_db_calc[df_db_calc["date_only"] >= last30].groupby("date_only")["المدة_بالدقائق"].sum().reset_index()
-        all_dates = pd.DataFrame({"date_only": pd.date_range(last30, datetime.date.today()).date})
-        trend = all_dates.merge(trend, on="date_only", how="left").fillna(0)
+    st.subheader("📈 منحنى تطور الأداء وحجم الساعات")
+    if not df_filtered.empty:
+        trend = df_filtered.groupby("date_only")["المدة_بالدقائق"].sum().reset_index()
         trend["الساعات"] = trend["المدة_بالدقائق"] / 60
+        trend = trend.sort_values("date_only")
 
         fig_line = px.line(trend, x="date_only", y="الساعات", markers=True)
         fig_line.update_layout(height=300, margin=dict(l=10, r=10, t=20, b=10))
         st.plotly_chart(fig_line, use_container_width=True, config={"displayModeBar": False})
+    else:
+        st.info("أدخل بيانات أو وسّع النطاق الزمني لمشاهدة خط التطور السلوكي للتمارين.")
+
+    st.markdown("---")
+    st.subheader("🏆 قائمة الإنجازات المفتوحة (دائمة)")
+    cols = st.columns(2)
+    for i, (icon, name, unlocked) in enumerate(achievements):
+        with cols[i % 2]:
+            if unlocked:
+                st.success(f"{icon} {name} (مكتمل)")
+            else:
+                st.info(f"🔒 {icon} {name} (قيد التقدم)")
