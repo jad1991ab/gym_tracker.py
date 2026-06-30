@@ -34,7 +34,7 @@ def save_stopwatch_state(running, start_time, elapsed, mode="free", duration_min
 
 saved_state = load_stopwatch_state()
 
-# حل مشكلة الـ Widget instantiated: استخدام الـ Session State بشكل مستقل
+# تهيئة قيم الجلسة الآمنة
 if "duration_val" not in st.session_state:
     st.session_state.duration_val = 1.0
 
@@ -44,9 +44,6 @@ if "sw_running" not in st.session_state:
     st.session_state.sw_elapsed = saved_state["elapsed"]
     st.session_state.sw_mode = saved_state["mode"]
     st.session_state.sw_pomo_mins = saved_state["duration_mins"]
-
-def set_duration(amount):
-    st.session_state.duration_val = float(amount)
 
 def make_hashes(password): 
     return hashlib.sha256(str.encode(password)).hexdigest()
@@ -90,10 +87,15 @@ def load_data():
             return pd.DataFrame(columns=COLUMNS)
         
         df = pd.DataFrame(records)
-        # تنظيف والتأكد من وجود جميع الأعمدة الأساسية لمنع أخطاء الـ KeyError
+        
+        # تنظيف الصفوف الفارغة تماماً من جداول جوجل الافتراضية لحماية الفهارس والعمليات الحسابية
+        df.dropna(how='all', inplace=True)
+        
+        # حماية من خطأ KeyError عبر بناء الأعمدة المفقودة تلقائياً
         for col in COLUMNS:
             if col not in df.columns: 
                 df[col] = ""
+                
         return df[COLUMNS]
     except Exception as e:
         return pd.DataFrame(columns=COLUMNS)
@@ -101,14 +103,11 @@ def load_data():
 def save_data(df):
     try:
         clean_df = df[COLUMNS].copy()
-        
-        # حل خطأ تجاوز حدود الورقة وجدول البيانات الذكي
         try:
             sheet_main.clear()
         except:
             pass
             
-        # توسيع الشبكة برمجياً لتجنب خطأ Exceeds grid limits
         req_rows = max(len(clean_df) + 50, 100)
         req_cols = len(COLUMNS) + 5
         if sheet_main.row_count < req_rows or sheet_main.col_count < req_cols:
@@ -120,12 +119,8 @@ def save_data(df):
         st.error(f"خطأ أثناء الحفظ في قاعدة البيانات: {e}")
 
 # ==========================================
-# 🔐 نظام إدارة الجلسات وتأكيد الهوية
+# 🔐 القواميس والترجمة لإدارة اللغات
 # ==========================================
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
-if "username" not in st.session_state: st.session_state.username = ""
-if "user_role" not in st.session_state: st.session_state.user_role = "User"
-
 LEXICON = {
     "AR": {
         "nav_title": "🧭 قائمة التنقل", "page_log": "📥 تسجيل نشاط جديد", "page_dash": "📊 لوحة التحكم والإحصاءات", "page_admin": "👑 إدارة المستخدمين (المدير)",
@@ -147,7 +142,7 @@ LEXICON = {
         "date_from": "من تاريخ:", "date_to": "إلى تاريخ:",
         "metric_curr_streak": "🔥 السلسلة الحالية", "metric_max_streak": "🏆 أطول سلسلة (Streak)", "metric_scoped_hrs": "⏱ إجمالي الساعات", "metric_entries": "📋 عدد الأنشطة", "metric_today_vol": "🎯 ساعات اليوم", "metric_dominant": "⭐ الأكثر تفضيلاً",
         "days_unit": "يوم", "hours_unit": "س", "radar_sub": "🎯 رادار الأهداف الذكية ومعدلات الإنجاز", "r_daily": "الهدف اليومي", "r_weekly": "الهدف الأسبوعي", "r_monthly": "الهدف الشهري", "r_comp": "من الهدف",
-        "grid_sub": "🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)", "pie_sub": "🍕 distribution", "pie_empty": "لا توجد أنشطة مسجلة في هذا النطاق الزمني لعرض توزيعها.",
+        "grid_sub": "🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)", "pie_sub": "🍕 التوزيع النظري للأنشطة", "pie_empty": "لا توجد أنشطة مسجلة في هذا النطاق الزمني لعرض توزيعها.",
         "trend_sub": "📈 منحنى تطور الأداء وحجم الساعات", "trend_empty": "أدخل بيانات أو وسّع النقاط لمشاهدة خط التطور.",
         "ach_sub": "🏆 قائمة الإنجازات المفتوحة (دائمة)", "ach_comp": "(مكتمل)", "ach_prog": "(قيد التقدم)", "gym_def": "الدراسة 📚", "study_def": "النادي 🏋️‍♂️", "work_def": "العمل 💼", "custom_err": "يرجى كتابة اسم النشاط المخصص أولاً!",
         "login_title": "🔒 نظام تسجيل الدخول الموحد", "username_lbl": "اسم المستخدم", "password_lbl": "كلمة المرور", "login_btn": "🚪 تسجيل الدخول", "logout_btn": "🚪 تسجيل الخروج", "invalid_login": "❌ اسم المستخدم أو كلمة المرور غير صحيحة",
@@ -173,7 +168,7 @@ LEXICON = {
         "date_from": "Start Date:", "date_to": "End Date:",
         "metric_curr_streak": "🔥 Current Streak", "metric_max_streak": "🏆 Longest Streak", "metric_scoped_hrs": "⏱️ Scoped Duration", "metric_entries": "📋 Log Entries Count", "metric_today_vol": "🎯 Today's Volume", "metric_dominant": "⭐ Dominant Activity",
         "days_unit": "Days", "hours_unit": "Hrs", "radar_sub": "🎯 Smart Goals Objective Monitor", "r_daily": "Daily Target", "r_weekly": "Weekly Target", "r_monthly": "Monthly Target", "r_comp": "Completed",
-        "grid_sub": "🧱 Annual Consistency Grid", "pie_sub": "🍕 Allocation", "pie_empty": "No distribution entries found inside current evaluation range.",
+        "grid_sub": "🧱 Annual Consistency Grid", "pie_sub": "🍕 Allocation Distribution", "pie_empty": "No distribution entries found inside current evaluation range.",
         "trend_sub": "📈 Performance Trend Evolution", "trend_empty": "Log additional activities or expand timeline criteria to map progress charts.",
         "ach_sub": "🏆 Permanent Achievement Milestones", "ach_comp": "(Unlocked)", "ach_prog": "(In Progress)", "gym_def": "Studying 📚", "study_def": "Gym 🏋️‍♂️", "work_def": "Work 💼", "custom_err": "Please enter a custom activity label first!",
         "login_title": "🔒 Secure Unified Login System", "username_lbl": "Username", "password_lbl": "Password", "login_btn": "🚪 Sign In", "logout_btn": "🚪 Log Out", "invalid_login": "❌ Invalid Username or Password",
@@ -187,8 +182,12 @@ lang = st.sidebar.selectbox("Choose Application Language:", ["العربية", "
 L = LEXICON["AR"] if lang == "العربية" else LEXICON["EN"]
 
 # ==========================================
-# 🛑 واجهة تسجيل الدخول
+# 🛑 نظام تسجيل الدخول الموحد
 # ==========================================
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "username" not in st.session_state: st.session_state.username = ""
+if "user_role" not in st.session_state: st.session_state.user_role = "User"
+
 if not st.session_state.logged_in:
     st.markdown(f"<h2 style='text-align: center;'>{L['login_title']}</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 1.5, 1])
@@ -212,7 +211,7 @@ if not st.session_state.logged_in:
                     st.error(L["invalid_login"])
     st.stop()
 
-# قراءة قاعدة البيانات الموحدة
+# قراءة قاعدة البيانات الموحدة ونظيفة
 df_db_all = load_data()
 
 # الخيارات الجانبية بعد تسجيل الدخول
@@ -247,50 +246,33 @@ DAILY_GOAL = st.sidebar.number_input(L["g_daily"], min_value=0.5, max_value=24.0
 WEEKLY_GOAL = st.sidebar.number_input(L["g_weekly"], min_value=1.0, max_value=168.0, value=14.0, step=1.0)
 MONTHLY_GOAL = st.sidebar.number_input(L["g_monthly"], min_value=5.0, max_value=744.0, value=60.0, step=5.0)
 
-def render_duration_section(col_context):
+# حل مشكلة تكرار الـ Duplicate Element Key بواسطة المعرف المخصص التلقائي (Prefix)
+def render_duration_section(col_context, key_prefix="default"):
     with col_context:
-        # 1. التحقق من وجود القيمة الافتراضية في الجلسة أو تعيينها
-        if "duration_val" not in st.session_state:
-            st.session_state.duration_val = 1.0
-            
-        # 2. عرض مربع الإدخال مع ربط قيمته (value) بمتغير الجلسة بدلاً من الـ key المباشر لمنع التعارض
         duration_input = st.number_input(
             L["duration_lbl"], 
             min_value=0.1, 
             max_value=24.0, 
             step=0.1, 
-            value=float(st.session_state.duration_val)
+            value=float(st.session_state.duration_val),
+            key=f"num_in_{key_prefix}"
         )
-        
-        # تحديث الجلسة فوراً إذا قام المستخدم بالتغيير اليدوي عبر الأسهم
         st.session_state.duration_val = duration_input
         
         st.caption(L["presets_lbl"])
         b1, b2, b3, b4 = st.columns(4)
-        
-        # 3. عند الضغط على الأزرار السريعة يتم تحديث القيمة وعمل rerun آمن تماماً
-        if b1.button(L["m30"], key="b30", use_container_width=True): 
+        if b1.button(L["m30"], key=f"b30_{key_prefix}", use_container_width=True): 
             st.session_state.duration_val = 0.5
             st.rerun()
-        if b2.button(L["h1"], key="b1h", use_container_width=True): 
+        if b2.button(L["h1"], key=f"b1h_{key_prefix}", use_container_width=True): 
             st.session_state.duration_val = 1.0
             st.rerun()
-        if b3.button(L["h15"], key="b15", use_container_width=True): 
+        if b3.button(L["h15"], key=f"b15_{key_prefix}", use_container_width=True): 
             st.session_state.duration_val = 1.5
             st.rerun()
-        if b4.button(L["h2"], key="b2h", use_container_width=True): 
+        if b4.button(L["h2"], key=f"b2h_{key_prefix}", use_container_width=True): 
             st.session_state.duration_val = 2.0
             st.rerun()
-            
-    with col_context:
-        # حل مشكلة تعديل الـ widget: ربط القيمة بمتغير ديناميكي مستقل
-        st.number_input(L["duration_lbl"], min_value=0.1, max_value=24.0, step=0.1, key="duration_val")
-        st.caption(L["presets_lbl"])
-        b1, b2, b3, b4 = st.columns(4)
-        if b1.button(L["m30"], key="b30", use_container_width=True): set_duration(0.5); st.rerun()
-        if b2.button(L["h1"], key="b1h", use_container_width=True): set_duration(1.0); st.rerun()
-        if b3.button(L["h15"], key="b15", use_container_width=True): set_duration(1.5); st.rerun()
-        if b4.button(L["h2"], key="b2h", use_container_width=True): set_duration(2.0); st.rerun()
 
 @st.dialog(L["del_dialog_title"])
 def confirm_delete_dialog(indices, is_all=False):
@@ -309,7 +291,6 @@ def confirm_delete_dialog(indices, is_all=False):
     else:
         st.warning(f"{L['del_sel_warn']} {len(indices)}")
         if st.button(L["del_sel_btn"], type="primary", use_container_width=True):
-            # استخدام الفهرس الفعلي الرئيسي لقاعدة البيانات لمنع أخطاء الحذف العشوائي
             updated_df = df_db_all.drop(indices).reset_index(drop=True)
             save_data(updated_df)
             st.toast("Deleted!", icon="🗑️")
@@ -320,6 +301,7 @@ now = datetime.datetime.now()
 today_date = now.date()
 current_year = now.year
 
+# مصفوفة الفهارس الحسابية الآمنة
 if not df_db.empty:
     df_db_calc = df_db.copy()
     df_db_calc['parsed_date'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
@@ -419,14 +401,14 @@ if page == L["page_log"]:
             selected_activity = st.selectbox(L["act_cat"], activities_list, key="act_auto")
             if selected_activity == L["act_custom_opt"]: custom_activity = st.text_input(L["act_custom_lbl"], key="cust_auto")
             activity_notes = st.text_input(L["notes_lbl"], placeholder=L["notes_ph"], key="notes_auto")
-        render_duration_section(c2)
+        render_duration_section(c2, key_prefix="auto_layout")
     else:
         c1, c2, c3 = st.columns([2, 1.5, 1.5])
         with c1:
             selected_activity = st.selectbox(L["act_cat"], activities_list, key="act_manual")
             if selected_activity == L["act_custom_opt"]: custom_activity = st.text_input(L["act_custom_lbl"], key="cust_manual")
             activity_notes = st.text_input(L["notes_lbl"], placeholder=L["notes_ph_manual"], key="notes_manual")
-        render_duration_section(c1)
+        render_duration_section(c1, key_prefix="manual_layout")
         with c2: target_date = st.date_input(L["cal_lbl"], value=today_date)
         with c3:
             clock_html = f"""
@@ -481,23 +463,21 @@ if page == L["page_log"]:
         st.toast(L["success_toast"].format(final_activity), icon="🔥")
         st.rerun()
 
-    # قسم الحذف الآمن والمصحح
+    # قسم الحذف المطور الآمن
     if not df_db.empty:
         st.markdown("---")
         st.subheader(L["history_sub"])
         display_df = df_db.copy()
         
-        # حماية ضد أخطاء فقدان الأعمدة عند التهيئة الصفرية للجدول
+        # ملء الخانات المفقودة لضمان عدم ظهور أخطاء حزم الباندا والـ NaN
         for c in COLUMNS:
             if c not in display_df.columns: display_df[c] = ""
             
         display_df[L['col_del']] = False
-        
-        # حماية عملية تحويل البيانات الحسابية من أخطاء الـ TypeError
         display_df['المدة_بالدقائق'] = pd.to_numeric(display_df['المدة_بالدقائق'], errors='coerce').fillna(0)
         display_df[L['col_hours']] = round(display_df['المدة_بالدقائق'] / 60, 2)
         
-        display_df[L['col_notes']] = display_df['الملاحظات'].astype(str).replace("nan", "")
+        display_df[L['col_notes']] = display_df['الملاحظات'].astype(str).replace(["nan", "None", ""], "-")
         display_df[L['col_ts']] = display_df['التاريخ']
         display_df[L['col_user']] = display_df['المستخدم']
         display_df[L['col_cat']] = display_df['النشاط']
