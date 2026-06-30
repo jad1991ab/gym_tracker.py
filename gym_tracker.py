@@ -88,10 +88,9 @@ def fix_google_serial_date(val):
     
     # التحقق مما إذا كان التاريخ قد تحول إلى رقم تسلسلي عشري أو صحيح
     clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
-    if clean_numeric_check.isdigit(): # تم إزالة شرط الطول هنا للإمساك بالأرقام الطويلة
+    if clean_numeric_check.isdigit(): # تم حذف شرط الطول للإمساك بجميع الأرقام الطويلة بنجاح
         try:
             serial_num = float(val_str)
-            # نقطة البداية لتاريخ إكسل وجوجل شيتس الافتراضي هو 30 ديسمبر 1899
             base_date = datetime.datetime(1899, 12, 30)
             converted_dt = base_date + datetime.timedelta(days=serial_num)
             return converted_dt.strftime('%Y-%m-%d %H:%M:%S')
@@ -102,7 +101,6 @@ def fix_google_serial_date(val):
 @st.cache_data(ttl=5)
 def load_data():
     try:
-        # قراءة القيم كنصوص معالجة أو غير منسقة لضمان الإمساك بالأرقام التسلسلية وإصلاحها
         records = sheet_main.get_all_records(value_render_option='UNFORMATTED_VALUE')
         if len(records) == 0: 
             return pd.DataFrame(columns=COLUMNS)
@@ -110,16 +108,13 @@ def load_data():
         df = pd.DataFrame(records)
         df.dropna(how='all', inplace=True)
         
-        # حماية الأعمدة وبنائها في حال الفقدان
         for col in COLUMNS:
             if col not in df.columns: 
                 df[col] = ""
         
-        # تطبيق الفلتر الذكي لإصلاح عمود التاريخ والوقت التالف
         if 'التاريخ' in df.columns:
             df['التاريخ'] = df['التاريخ'].apply(fix_google_serial_date)
         if 'الساعة' in df.columns:
-            # إصلاح الوقت إذا تسبب جوجل شيتس بتحويله لكسر عشري (مثل 0.82)
             df['الساعة'] = df['الساعة'].apply(lambda x: fix_google_serial_date(x).split(' ')[-1] if (str(x).replace('.','',1).isdigit() and '.' in str(x)) else x)
                 
         return df[COLUMNS]
@@ -149,7 +144,7 @@ def save_data(df):
 # ==========================================
 LEXICON = {
     "AR": {
-        "nav_title": "🧭 قائمة التنقل", "page_log": "📥 تسجيل نشاط جديد", "page_dash": "📊 لوحة التحكم والإحصاءات", "page_admin": "👑 إدارة المستخدمين (المدير)",
+        "nav_title": "🧭 قائمة التنقل", "page_log": "📥 تسجيل نشاط جديد", "page_dash": "📊 لوحة التحكم والإحصاءات", "page_admin": "👑 إدارة المستخدمين (المدير)", "page_game": "🏆 ساحة الإنجازات والترتيب",
         "goals_setup": "🎯 إدارة الأهداف الذكية", "g_daily": "الهدف اليومي (ساعات):", "g_weekly": "الهدف الأسبوعي (ساعات):", "g_monthly": "الهدف الشهري (ساعات):",
         "duration_lbl": "مدة النشاط (بالساعات)", 
         "del_dialog_title": "⚠️ تأكيد عملية الحذف", "del_all_warn": "🚨 هل أنت متأكد تماماً؟ لا يمكن التراجع عن هذا الإجراء!", "del_all_btn": "❌ نعم، امسح السجل بالكامل",
@@ -175,7 +170,7 @@ LEXICON = {
         "admin_scope": "🔍 استعراض بيانات مستخدم محدد (نطاق المدير):", "all_users_opt": "👥 كل المستخدمين معاً", "create_user_sub": "➕ إنشاء حساب مستخدم جديد", "new_user_lbl": "اسم المستخدم الجديد", "new_pass_lbl": "كلمة المرور الجديدة", "role_lbl": "الصلاحية", "create_btn": "💼 إنشاء الحساب وحفظه برمز مشفر"
     },
     "EN": {
-        "nav_title": "🧭 Navigation", "page_log": "📥 Log New Activity", "page_dash": "📊 Analytics Dashboard", "page_admin": "👑 User Management (Admin)",
+        "nav_title": "🧭 Navigation", "page_log": "📥 Log New Activity", "page_dash": "📊 Analytics Dashboard", "page_admin": "👑 User Management (Admin)", "page_game": "🏆 Gamification & Leaderboard",
         "goals_setup": "🎯 Smart Goals Setup", "g_daily": "Daily Goal (Hours):", "g_weekly": "Weekly Goal (Hours):", "g_monthly": "Monthly Goal (Hours):",
         "duration_lbl": "Activity Duration (Hours)",
         "del_dialog_title": "⚠️ Confirm Deletion", "del_all_warn": "🚨 Are you absolutely sure? This action cannot be undone!", "del_all_btn": "❌ Yes, wipe all data",
@@ -245,7 +240,9 @@ if st.sidebar.button(L["logout_btn"], type="secondary", use_container_width=True
 
 st.sidebar.markdown("---")
 st.sidebar.title(L["nav_title"])
-pages_available = [L["page_log"], L["page_dash"]]
+
+# إضافة شاشة الالعاب لقائمة التنقل
+pages_available = [L["page_log"], L["page_dash"], L["page_game"]]
 if st.session_state.user_role == "Admin":
     pages_available.append(L["page_admin"])
 page = st.sidebar.radio("", pages_available)
@@ -266,7 +263,7 @@ DAILY_GOAL = st.sidebar.number_input(L["g_daily"], min_value=0.5, max_value=24.0
 WEEKLY_GOAL = st.sidebar.number_input(L["g_weekly"], min_value=1.0, max_value=168.0, value=14.0, step=1.0)
 MONTHLY_GOAL = st.sidebar.number_input(L["g_monthly"], min_value=5.0, max_value=744.0, value=60.0, step=5.0)
 
-# حقل الوقت المبسط (بدون أي أزرار سريعة تسبب أخطاء)
+# حقل الوقت المبسط
 def render_duration_section(col_context, key_prefix="default"):
     with col_context:
         duration_input = st.number_input(
@@ -306,6 +303,17 @@ now = datetime.datetime.now()
 today_date = now.date()
 current_year = now.year
 
+if not df_db_all.empty:
+    df_db_all_calc = df_db_all.copy()
+    df_db_all_calc['parsed_date'] = pd.to_datetime(df_db_all_calc['التاريخ'], errors='coerce')
+    df_db_all_calc['short_date'] = df_db_all_calc['parsed_date'].dt.strftime('%Y-%m-%d')
+    df_db_all_calc['المدة_بالدقائق'] = pd.to_numeric(df_db_all_calc['المدة_بالدقائق'], errors='coerce').fillna(0)
+    df_db_all_calc["date_only"] = df_db_all_calc["parsed_date"].dt.date
+else:
+    df_db_all_calc = df_db_all.copy()
+    df_db_all_calc['short_date'] = pd.Series(dtype='str')
+    df_db_all_calc["date_only"] = pd.Series(dtype='object')
+
 if not df_db.empty:
     df_db_calc = df_db.copy()
     df_db_calc['parsed_date'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
@@ -316,6 +324,29 @@ else:
     df_db_calc = df_db.copy()
     df_db_calc['short_date'] = pd.Series(dtype='str')
     df_db_calc["date_only"] = pd.Series(dtype='object')
+
+# حساب الـ Streak للمستخدم الحالي لاستخدامه في الأقسام والشارات
+current_streak = 0
+best_streak = 0
+if not df_db_calc.empty:
+    unique_days = sorted(set(df_db_calc["date_only"].dropna()))
+    streak = 0
+    check_day = today_date
+    while check_day in unique_days:
+        streak += 1
+        check_day -= timedelta(days=1)
+    current_streak = streak
+
+    best = 0
+    temp = 1
+    if len(unique_days) > 0:
+        for i in range(1, len(unique_days)):
+            if unique_days[i] == unique_days[i-1] + timedelta(days=1): temp += 1
+            else:
+                best = max(best, temp)
+                temp = 1
+        best = max(best, temp)
+    best_streak = best
 
 # ==========================================
 # 1. شاشة تسجيل الأنشطة
@@ -467,7 +498,6 @@ if page == L["page_log"]:
         st.toast(L["success_toast"].format(final_activity), icon="🔥")
         st.rerun()
 
-    # السجل المنظف والخالي من رموز السيريال والتعبيرات العشوائية
     if not df_db.empty:
         st.markdown("---")
         st.subheader(L["history_sub"])
@@ -534,30 +564,10 @@ elif page == L["page_dash"]:
     else:
         df_filtered = df_db_calc.copy()
 
-    current_streak, best_streak = 0, 0
     today_hours, week_hours, month_hours, total_hours, activities_count = 0, 0, 0, 0, 0
     most_activity = "-"
 
     if not df_db_calc.empty:
-        unique_days = sorted(set(df_db_calc["date_only"].dropna()))
-        streak = 0
-        check_day = today_date
-        while check_day in unique_days:
-            streak += 1
-            check_day -= timedelta(days=1)
-        current_streak = streak
-
-        best = 0
-        temp = 1
-        if len(unique_days) > 0:
-            for i in range(1, len(unique_days)):
-                if unique_days[i] == unique_days[i-1] + timedelta(days=1): temp += 1
-                else:
-                    best = max(best, temp)
-                    temp = 1
-            best = max(best, temp)
-        best_streak = best
-
         today_hours = round(df_db_calc[df_db_calc["date_only"] == today_date]["المدة_بالدقائق"].sum()/60, 1)
         start_week = today_date - timedelta(days=today_date.weekday())
         week_hours = round(df_db_calc[df_db_calc["date_only"] >= start_week]["المدة_بالدقائق"].sum()/60, 1)
@@ -638,7 +648,137 @@ elif page == L["page_dash"]:
         else: st.info(L["pie_empty"])
 
 # ==========================================
-# 3. شاشة لوحة تحكم الإدارة (المدير الحصري)
+# 🎮 3. شاشة التلعيب والتحفيز (Gamification Hub)
+# ==========================================
+elif page == L["page_game"]:
+    st.header("🏆 ساحة التحفيز والألعاب" if lang == "العربية" else "🏆 Gamification & Rewards Arena")
+    
+    # حساب إجمالي الساعات للمستخدم الحالي لتحديد المستوى والنقاط
+    user_total_mins = df_db_calc["المدة_بالدقائق"].sum() if not df_db_calc.empty else 0
+    user_total_hours = round(user_total_mins / 60, 2)
+    
+    # معادلة النقاط: كل ساعة تركيز = 100 نقطة
+    user_xp = int(user_total_hours * 100)
+    
+    # معادلة المستوى: كل مستوى يحتاج 500 نقطة خبرة XP
+    user_level = (user_xp // 500) + 1
+    xp_in_current_level = user_xp % 500
+    progress_to_next_level = xp_in_current_level / 500
+    
+    # ---- الجزء الأول: ركن بطاقة المستخدم الحالي والمستوى ----
+    st.markdown("### 👤 ملف التطور الرقمي" if lang == "العربية" else "### 👤 Digital Evolution Profile")
+    prof_col1, prof_col2 = st.columns([1, 3])
+    
+    with prof_col1:
+        st.metric(label="🌟 المستوى الحالي" if lang == "العربية" else "🌟 Current Level", value=f"LVL {user_level}")
+        st.caption(f"🪙 إجمالي النقاط: {user_xp} XP" if lang == "العربية" else f"🪙 Total Score: {user_xp} XP")
+        
+    with prof_col2:
+        st.markdown(f"**التقدم للمستوى القادم ({user_level + 1}):**" if lang == "العربية" else f"**Progress to Next Level ({user_level + 1}):**")
+        st.progress(progress_to_next_level)
+        st.caption(f"متبقي {500 - xp_in_current_level} XP للترقية!" if lang == "العربية" else f"{500 - xp_in_current_level} XP left to level up!")
+
+    st.markdown("---")
+    
+    # ---- الجزء الثاني: لوحة الصدارة التنافسية للجروب ----
+    st.markdown("### 📊 لوحة صدارة المجموعات" if lang == "العربية" else "### 📊 Group Leaderboard")
+    
+    if not df_db_all_calc.empty:
+        # تجميع البيانات لكل مستخدم وحساب الساعات والنقاط
+        leaderboard_df = df_db_all_calc.groupby("المستخدم")["المدة_بالدقائق"].sum().reset_index()
+        leaderboard_df["الساعات الإجمالية"] = round(leaderboard_df["المدة_بالدقائق"] / 60, 1)
+        leaderboard_df["نقاط الخبرة (XP)"] = (leaderboard_df["الساعات الإجمالية"] * 100).astype(int)
+        leaderboard_df["المستوى"] = (leaderboard_df["نقاط الخبرة (XP)"] // 500) + 1
+        
+        # ترتيب المستخدمين تنازلياً حسب النقاط
+        leaderboard_df = leaderboard_df.sort_values(by="نقاط الخبرة (XP)", ascending=False).reset_index(drop=True)
+        leaderboard_df.index = leaderboard_df.index + 1
+        leaderboard_df.index.name = "الترتيب" if lang == "العربية" else "Rank"
+        
+        # إضافة تيجان تجميلية للمراكز الثلاثة الأولى
+        def add_crown(rank):
+            if rank == 1: return "🥇 المركز الأول" if lang == "العربية" else "🥇 1st Place"
+            elif rank == 2: return "🥈 المركز الثاني" if lang == "العربية" else "🥈 2nd Place"
+            elif rank == 3: return "🥉 المركز الثالث" if lang == "العربية" else "🥉 3rd Place"
+            return f"🏅 المرتبة {rank}" if lang == "العربية" else f"🏅 Rank {rank}"
+            
+        leaderboard_df["الوسام"] = [add_crown(i) for i in leaderboard_df.index]
+        
+        # عرض جدول الصدارة المنظم
+        st.dataframe(
+            leaderboard_df[["الوسام", "المستخدم", "الساعات الإجمالية", "نقاط الخبرة (XP)", "المستوى"]],
+            use_container_width=True
+        )
+    else:
+        st.info("لا توجد بيانات كافية لعرض لوحة الصدارة حالياً." if lang == "العربية" else "No logs found to construct leaderboard.")
+
+    st.markdown("---")
+    
+    # ---- الجزء الثالث: نظام الشارات والميداليات الرقمية الذكي ----
+    st.markdown("### 🏅 الشارات والميداليات الرقمية المحققة" if lang == "العربية" else "### 🏅 Unlocked Digital Badges")
+    
+    badge_col1, badge_col2, badge_col3, badge_col4 = st.columns(4)
+    
+    # 1. شارة البداية (مبتدئ الحماس)
+    with badge_col1:
+        has_badge1 = user_total_hours >= 1.0
+        bg_color = "#e1f5fe" if has_badge1 else "#f5f5f5"
+        border_color = "#0288d1" if has_badge1 else "#bdbdbd"
+        st.markdown(f"""
+        <div style="background-color:{bg_color}; border:2px solid {border_color}; padding:15px; border-radius:10px; text-align:center;">
+            <h2 style="margin:0;">🌱</h2>
+            <h4 style="margin:5px 0 0 0; color:{border_color};">مبتدئ الحماس</h4>
+            <p style="font-size:12px; margin:5px 0 0 0; color:#555;">تسجيل أول ساعة تركيز بنجاح</p>
+            <b style="color:{'green' if has_badge1 else 'gray'}; font-size:12px;">{'[ ✔️ مكتمل ]' if lang=='العربية' else '[ ✔️ Unlocked ]' if has_badge1 else '[ 🔒 قيد التقدم ]'}</b>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 2. شارة الالتزام العالي (وحش الالتزام)
+    with badge_col2:
+        has_badge2 = user_total_hours >= 100.0
+        bg_color = "#efebe9" if has_badge2 else "#f5f5f5"
+        border_color = "#5d4037" if has_badge2 else "#bdbdbd"
+        st.markdown(f"""
+        <div style="background-color:{bg_color}; border:2px solid {border_color}; padding:15px; border-radius:10px; text-align:center;">
+            <h2 style="margin:0;">🏋️‍♂️</h2>
+            <h4 style="margin:5px 0 0 0; color:{border_color};">وحش الالتزام</h4>
+            <p style="font-size:12px; margin:5px 0 0 0; color:#555;">تخطي 100 ساعة عمل كاملة</p>
+            <b style="color:{'green' if has_badge2 else 'gray'}; font-size:12px;">{'[ ✔️ مكتمل ]' if lang=='العربية' else '[ ✔️ Unlocked ]' if has_badge2 else f'[ {user_total_hours}/100 🔒 ]'}</b>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 3. شارة السلسلة المتتالية (المواظب الأسطوري)
+    with badge_col3:
+        has_badge3 = best_streak >= 7
+        bg_color = "#fff3e0" if has_badge3 else "#f5f5f5"
+        border_color = "#f57c00" if has_badge3 else "#bdbdbd"
+        st.markdown(f"""
+        <div style="background-color:{bg_color}; border:2px solid {border_color}; padding:15px; border-radius:10px; text-align:center;">
+            <h2 style="margin:0;">🔥</h2>
+            <h4 style="margin:5px 0 0 0; color:{border_color};">المواظب الأسطوري</h4>
+            <p style="font-size:12px; margin:5px 0 0 0; color:#555;">التزام مستمر لمدة 7 أيام متتالية</p>
+            <b style="color:{'green' if has_badge3 else 'gray'}; font-size:12px;">{'[ ✔️ مكتمل ]' if lang=='العربية' else '[ ✔️ Unlocked ]' if has_badge3 else f'[ {best_streak}/7 🔒 ]'}</b>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 4. شارة خبير البومودورو (سيد التركيز)
+    with badge_col4:
+        # حساب كم نشاط تم تسجيله عبر مؤقت البومودورو أو الأنشطة العامة
+        total_sessions = len(df_db_calc) if not df_db_calc.empty else 0
+        has_badge4 = total_sessions >= 30
+        bg_color = "#e8f5e9" if has_badge4 else "#f5f5f5"
+        border_color = "#388e3c" if has_badge4 else "#bdbdbd"
+        st.markdown(f"""
+        <div style="background-color:{bg_color}; border:2px solid {border_color}; padding:15px; border-radius:10px; text-align:center;">
+            <h2 style="margin:0;">🎯</h2>
+            <h4 style="margin:5px 0 0 0; color:{border_color};">سيد التركيز</h4>
+            <p style="font-size:12px; margin:5px 0 0 0; color:#555;">تسجيل وإتمام 30 جلسة تركيز</p>
+            <b style="color:{'green' if has_badge4 else 'gray'}; font-size:12px;">{'[ ✔️ مكتمل ]' if lang=='العربية' else '[ ✔️ Unlocked ]' if has_badge4 else f'[ {total_sessions}/30 🔒 ]'}</b>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ==========================================
+# 4. شاشة لوحة تحكم الإدارة (المدير الحصري)
 # ==========================================
 elif page == L["page_admin"] and st.session_state.user_role == "Admin":
     st.header(L["page_admin"])
