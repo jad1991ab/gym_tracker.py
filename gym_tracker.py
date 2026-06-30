@@ -48,6 +48,7 @@ if "sw_running" not in st.session_state:
 def make_hashes(password): 
     return hashlib.sha256(str.encode(password)).hexdigest()
 
+# تعيين صلاحيات جوجل درايف وجوجل شيتس
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 @st.cache_resource
@@ -60,7 +61,7 @@ def get_spreadsheet():
 spreadsheet = get_spreadsheet()
 sheet_main = spreadsheet.sheet1
 
-# التحقق من ورقة المستخدمين
+# التحقق من وجود ورقة المستخدمين
 try:
     sheet_users = spreadsheet.worksheet("Users")
 except gspread.exceptions.WorksheetNotFound:
@@ -79,22 +80,42 @@ def load_users_db():
     except:
         return pd.DataFrame(columns=["Username", "Password", "Role"])
 
-@st.cache_data(ttl=15)
+# دالة ذكية لإصلاح تواريخ جوجل شيت المشوهة والأرقام العشرية بشكل فوري تلقائي
+def fix_google_serial_date(val):
+    if not val or pd.isna(val):
+        return ""
+    val_str = str(val).strip()
+    # التحقق مما إذا كان التاريخ قد تحول إلى رقم تسلسلي عشري (مثل 46203.82)
+    if val_str.replace('.', '', 1).isdigit() and '.' in val_str and len(val_str) < 15:
+        try:
+            serial_num = float(val_str)
+            # نقطة البداية لتاريخ إكسل وجوجل شيتس الافتراضي هو 30 ديسمبر 1899
+            base_date = datetime.datetime(1899, 12, 30)
+            converted_dt = base_date + datetime.timedelta(days=serial_num)
+            return converted_dt.strftime('%Y-%m-%d %H:%M:%S')
+        except:
+            pass
+    return val_str
+
+@st.cache_data(ttl=5)
 def load_data():
     try:
-        records = sheet_main.get_all_records()
+        # قراءة القيم كنصوص خام لتفادي تشويهات تنسيق جوجل الذكي تلقائياً
+        records = sheet_main.get_all_records(value_render_option='UNFORMATTED_VALUE')
         if len(records) == 0: 
             return pd.DataFrame(columns=COLUMNS)
         
         df = pd.DataFrame(records)
-        
-        # تنظيف الصفوف الفارغة تماماً من جداول جوجل الافتراضية لحماية الفهارس والعمليات الحسابية
         df.dropna(how='all', inplace=True)
         
-        # حماية من خطأ KeyError عبر بناء الأعمدة المفقودة تلقائياً
+        # حماية الأعمدة وبنائها في حال الفقدان
         for col in COLUMNS:
             if col not in df.columns: 
                 df[col] = ""
+        
+        # معالجة فورية وتطهير لعمود التاريخ الملوث قبل إرساله للتحليل أو العرض
+        if 'التاريخ' in df.columns:
+            df['التاريخ'] = df['التاريخ'].apply(fix_google_serial_date)
                 
         return df[COLUMNS]
     except Exception as e:
@@ -119,7 +140,7 @@ def save_data(df):
         st.error(f"خطأ أثناء الحفظ في قاعدة البيانات: {e}")
 
 # ==========================================
-# 🔐 القواميس والترجمة لإدارة اللغات
+# 🔐 نظام إدارة الترجمة واللغات
 # ==========================================
 LEXICON = {
     "AR": {
@@ -131,7 +152,7 @@ LEXICON = {
         "focus_hub": "⏱️ نظام التركيز المطور (ساعة الإيقاف)", "focus_sys": "اختر نظام التركيز:", "f_sw": "⏱️ عداد حر تصاعدي", "f_pomo": "🎯 مؤقت بومودورو (Pomodoro)",
         "pomo_sel": "اختر مدة جلسة التركيز (بالدقائق):", "sw_active": "العداد يعمل حالياً بنظام:", "sw_start_btn": "▶️ ابدأ التركيز الآن", "sw_stop_btn": "⏸️ إنهاء الجلسة وتعبئة الوقت",
         "sw_running_lbl": "⏳ العداد المستمر يعمل", "sw_remaining_lbl": "🎯 متبقي على النهاية", "pomo_done": "🎉 انتهت جلسة البومودورو بنجاح!",
-        "sw_updated_toast": "📥 تم تحديث حقل المدة بـ {} ساعة!", "sw_ready": "⏱️ الوقت المسجل الجاهز", "sw_reset": "🔄 تصفير وإعادة تعيين", "form_sub": "📥 نموذج البيانات والملء الذكي",
+        "sw_ready": "⏱️ الوقت المسجل الجاهز", "sw_reset": "🔄 تصفير وإعادة تعيين", "form_sub": "📥 نموذج البيانات والملء الذكي",
         "form_auto": "التسجيل التلقائي بالوقت والتاريخ الحالي فوراً ⚡", "act_cat": "النشاط", "act_custom_opt": "➕ إضافة نشاط مخصص...", "act_custom_lbl": "اكتب اسم النشاط الجديد هنا:",
         "notes_lbl": "✍️ ملاحظات وتعليقات على النشاط (اختياري):", "notes_ph": "مثال: تمرين، برمجة التطبيق", "notes_ph_manual": "مثال: مراجعة كاملة للملفات القديمة",
         "cal_lbl": "اختر التاريخ من التقويم 📅", "clock_lbl": "اضبط وقت النشاط ⌚", "submit_btn": "➕ تسجيل النشاط وحفظه تلقائياً", "success_toast": "✅ تم تسجيل نشاط ({}) بنجاح!",
@@ -157,7 +178,7 @@ LEXICON = {
         "focus_hub": "⏱️ Focus Hub (Stopwatch Engine)", "focus_sys": "Focus System:", "f_sw": "⏱️ Standard Stopwatch", "f_pomo": "🎯 Pomodoro Timer",
         "pomo_sel": "Select Session Duration (Minutes):", "sw_active": "Active Session:", "sw_start_btn": "▶️ Start Focus Session Now", "sw_stop_btn": "⏸️ Complete Current Session & Populate Time",
         "sw_running_lbl": "⏳ Stopwatch Running", "sw_remaining_lbl": "🎯 Remaining Time", "pomo_done": "🎉 Pomodoro session complete.",
-        "sw_updated_toast": "📥 Duration field updated with {} hours!", "sw_ready": "⏱️ Pending Tracked Time", "sw_reset": "🔄 Reset Timer", "form_sub": "📥 Input Form & Smart Prefills",
+        "sw_ready": "⏱️ Pending Tracked Time", "sw_reset": "🔄 Reset Timer", "form_sub": "📥 Input Form & Smart Prefills",
         "form_auto": "⚡ Real-time instant stamping (Current time & date)", "act_cat": "Activity Category", "act_custom_opt": "➕ Add Custom Activity...", "act_custom_lbl": "Enter custom activity name:",
         "notes_lbl": "✍️ Notes & Comments (Optional):", "notes_ph": "e.g., Workout, coding app block", "notes_ph_manual": "e.g., Extensive review of legacy assets",
         "cal_lbl": "Select Calendar Date 📅", "clock_lbl": "Set Timestamp ⌚", "submit_btn": "➕ Submit & Log Activity", "success_toast": "✅ Activity ({}) successfully logged!",
@@ -176,14 +197,11 @@ LEXICON = {
     }
 }
 
-# شريط اللغة الجانبي
 st.sidebar.title("🌐 Language / اللغة")
 lang = st.sidebar.selectbox("Choose Application Language:", ["العربية", "English"], index=0)
 L = LEXICON["AR"] if lang == "العربية" else LEXICON["EN"]
 
-# ==========================================
-# 🛑 نظام تسجيل الدخول الموحد
-# ==========================================
+# نظام الجلسة وتأمين الدخول
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "username" not in st.session_state: st.session_state.username = ""
 if "user_role" not in st.session_state: st.session_state.user_role = "User"
@@ -211,10 +229,8 @@ if not st.session_state.logged_in:
                     st.error(L["invalid_login"])
     st.stop()
 
-# قراءة قاعدة البيانات الموحدة ونظيفة
 df_db_all = load_data()
 
-# الخيارات الجانبية بعد تسجيل الدخول
 st.sidebar.markdown(f"#### 👤 {st.session_state.username} ({st.session_state.user_role})")
 if st.sidebar.button(L["logout_btn"], type="secondary", use_container_width=True):
     st.session_state.logged_in = False
@@ -229,7 +245,6 @@ if st.session_state.user_role == "Admin":
     pages_available.append(L["page_admin"])
 page = st.sidebar.radio("", pages_available)
 
-# تصفية وفلترة نطاق البيانات حسب الصلاحية
 if st.session_state.user_role == "Admin":
     unique_users_in_db = ["👥 الكل" if lang=="العربية" else "👥 All"] + list(load_users_db()["Username"].unique())
     selected_scope = st.sidebar.selectbox(L["admin_scope"], unique_users_in_db)
@@ -246,7 +261,7 @@ DAILY_GOAL = st.sidebar.number_input(L["g_daily"], min_value=0.5, max_value=24.0
 WEEKLY_GOAL = st.sidebar.number_input(L["g_weekly"], min_value=1.0, max_value=168.0, value=14.0, step=1.0)
 MONTHLY_GOAL = st.sidebar.number_input(L["g_monthly"], min_value=5.0, max_value=744.0, value=60.0, step=5.0)
 
-# حل مشكلة تكرار الـ Duplicate Element Key بواسطة المعرف المخصص التلقائي (Prefix)
+# 💡 حل مشكلة الأزرار السريعة: فصل الـ value الديناميكي وتخصيص مفاتيح مستقلة (Prefix) لكل قسم
 def render_duration_section(col_context, key_prefix="default"):
     with col_context:
         duration_input = st.number_input(
@@ -301,7 +316,6 @@ now = datetime.datetime.now()
 today_date = now.date()
 current_year = now.year
 
-# مصفوفة الفهارس الحسابية الآمنة
 if not df_db.empty:
     df_db_calc = df_db.copy()
     df_db_calc['parsed_date'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
@@ -314,7 +328,7 @@ else:
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
 # ==========================================
-# 1. الصفحة الأولى: تسجيل الأنشطة
+# 1. شاشة تسجيل الأنشطة
 # ==========================================
 if page == L["page_log"]:
     st.header(L["log_header"])
@@ -463,13 +477,12 @@ if page == L["page_log"]:
         st.toast(L["success_toast"].format(final_activity), icon="🔥")
         st.rerun()
 
-    # قسم الحذف المطور الآمن
+    # السجل والممحاة الآمنة
     if not df_db.empty:
         st.markdown("---")
         st.subheader(L["history_sub"])
         display_df = df_db.copy()
         
-        # ملء الخانات المفقودة لضمان عدم ظهور أخطاء حزم الباندا والـ NaN
         for c in COLUMNS:
             if c not in display_df.columns: display_df[c] = ""
             
@@ -507,7 +520,7 @@ if page == L["page_log"]:
         if st.button(L["wipe_all_trigger"]): confirm_delete_dialog(None, is_all=True)
 
 # ==========================================
-# 2. الصفحة الثانية: الإحصاءات والرسوم البيانية
+# 2. شاشة الإحصاءات والرسوم البيانية
 # ==========================================
 elif page == L["page_dash"]:
     st.header(L["dash_header"])
@@ -635,7 +648,7 @@ elif page == L["page_dash"]:
         else: st.info(L["pie_empty"])
 
 # ==========================================
-# 3. الصفحة الثالثة: إدارة حسابات المستخدمين (للمدير)
+# 3. شاشة لوحة تحكم الإدارة (المدير الحصري)
 # ==========================================
 elif page == L["page_admin"] and st.session_state.user_role == "Admin":
     st.header(L["page_admin"])
