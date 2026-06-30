@@ -80,13 +80,15 @@ def load_users_db():
     except:
         return pd.DataFrame(columns=["Username", "Password", "Role"])
 
-# دالة ذكية لإصلاح تواريخ جوجل شيت المشوهة والأرقام العشرية بشكل فوري تلقائي
+# دالة ذكية لإصلاح تواريخ جوجل شيت المشوهة (Serial Numbers) وتحويلها لتاريخ حقيقي
 def fix_google_serial_date(val):
     if not val or pd.isna(val):
         return ""
     val_str = str(val).strip()
-    # التحقق مما إذا كان التاريخ قد تحول إلى رقم تسلسلي عشري (مثل 46203.82)
-    if val_str.replace('.', '', 1).isdigit() and '.' in val_str and len(val_str) < 15:
+    
+    # التحقق مما إذا كان التاريخ قد تحول إلى رقم تسلسلي عشري أو صحيح (مثل 46203.82)
+    clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
+    if clean_numeric_check.isdigit() and len(val_str) < 15:
         try:
             serial_num = float(val_str)
             # نقطة البداية لتاريخ إكسل وجوجل شيتس الافتراضي هو 30 ديسمبر 1899
@@ -100,7 +102,7 @@ def fix_google_serial_date(val):
 @st.cache_data(ttl=5)
 def load_data():
     try:
-        # قراءة القيم كنصوص خام لتفادي تشويهات تنسيق جوجل الذكي تلقائياً
+        # قراءة القيم كنصوص معالجة أو غير منسقة لضمان الإمساك بالأرقام التسلسلية وإصلاحها
         records = sheet_main.get_all_records(value_render_option='UNFORMATTED_VALUE')
         if len(records) == 0: 
             return pd.DataFrame(columns=COLUMNS)
@@ -113,9 +115,12 @@ def load_data():
             if col not in df.columns: 
                 df[col] = ""
         
-        # معالجة فورية وتطهير لعمود التاريخ الملوث قبل إرساله للتحليل أو العرض
+        # تطبيق الفلتر الذكي لإصلاح عمود التاريخ والوقت التالف
         if 'التاريخ' in df.columns:
             df['التاريخ'] = df['التاريخ'].apply(fix_google_serial_date)
+        if 'الساعة' in df.columns:
+            # إصلاح الوقت إذا تسبب جوجل شيتس بتحويله لكسر عشري (مثل 0.82)
+            df['الساعة'] = df['الساعة'].apply(lambda x: fix_google_serial_date(x).split(' ')[-1] if (str(x).replace('.','',1).isdigit() and '.' in str(x)) else x)
                 
         return df[COLUMNS]
     except Exception as e:
@@ -146,7 +151,7 @@ LEXICON = {
     "AR": {
         "nav_title": "🧭 قائمة التنقل", "page_log": "📥 تسجيل نشاط جديد", "page_dash": "📊 لوحة التحكم والإحصاءات", "page_admin": "👑 إدارة المستخدمين (المدير)",
         "goals_setup": "🎯 إدارة الأهداف الذكية", "g_daily": "الهدف اليومي (ساعات):", "g_weekly": "الهدف الأسبوعي (ساعات):", "g_monthly": "الهدف الشهري (ساعات):",
-        "duration_lbl": "مدة النشاط (بالساعات)", "presets_lbl": "⏱️ أزرار تعيين الوقت السريعة:", "m30": "30 د", "h1": "1 س", "h15": "1.5 س", "h2": "2 س",
+        "duration_lbl": "مدة النشاط (بالساعات)", 
         "del_dialog_title": "⚠️ تأكيد عملية الحذف", "del_all_warn": "🚨 هل أنت متأكد تماماً؟ لا يمكن التراجع عن هذا الإجراء!", "del_all_btn": "❌ نعم، امسح السجل بالكامل",
         "del_sel_warn": "هل أنت متأكد أنك تريد حذف الأنشطة المحددة؟ العدد:", "del_sel_btn": "🗑️ تأكيد الحذف النهائي", "log_header": "🟢 تسجيل ومتابعة الأنشطة",
         "focus_hub": "⏱️ نظام التركيز المطور (ساعة الإيقاف)", "focus_sys": "اختر نظام التركيز:", "f_sw": "⏱️ عداد حر تصاعدي", "f_pomo": "🎯 مؤقت بومودورو (Pomodoro)",
@@ -172,7 +177,7 @@ LEXICON = {
     "EN": {
         "nav_title": "🧭 Navigation", "page_log": "📥 Log New Activity", "page_dash": "📊 Analytics Dashboard", "page_admin": "👑 User Management (Admin)",
         "goals_setup": "🎯 Smart Goals Setup", "g_daily": "Daily Goal (Hours):", "g_weekly": "Weekly Goal (Hours):", "g_monthly": "Monthly Goal (Hours):",
-        "duration_lbl": "Activity Duration (Hours)", "presets_lbl": "⏱️ Quick presets:", "m30": "30 m", "h1": "1 h", "h15": "1.5 h", "h2": "2 h",
+        "duration_lbl": "Activity Duration (Hours)",
         "del_dialog_title": "⚠️ Confirm Deletion", "del_all_warn": "🚨 Are you absolutely sure? This action cannot be undone!", "del_all_btn": "❌ Yes, wipe all data",
         "del_sel_warn": "Are you sure you want to permanently delete the selected activities? Count:", "del_sel_btn": "🗑️ Confirm Permanent Delete", "log_header": "🟢 Track & Log Activities",
         "focus_hub": "⏱️ Focus Hub (Stopwatch Engine)", "focus_sys": "Focus System:", "f_sw": "⏱️ Standard Stopwatch", "f_pomo": "🎯 Pomodoro Timer",
@@ -261,7 +266,7 @@ DAILY_GOAL = st.sidebar.number_input(L["g_daily"], min_value=0.5, max_value=24.0
 WEEKLY_GOAL = st.sidebar.number_input(L["g_weekly"], min_value=1.0, max_value=168.0, value=14.0, step=1.0)
 MONTHLY_GOAL = st.sidebar.number_input(L["g_monthly"], min_value=5.0, max_value=744.0, value=60.0, step=5.0)
 
-# 💡 حل مشكلة الأزرار السريعة: فصل الـ value الديناميكي وتخصيص مفاتيح مستقلة (Prefix) لكل قسم
+# حقل الوقت المبسط (بدون أي أزرار سريعة تسبب أخطاء)
 def render_duration_section(col_context, key_prefix="default"):
     with col_context:
         duration_input = st.number_input(
@@ -273,21 +278,6 @@ def render_duration_section(col_context, key_prefix="default"):
             key=f"num_in_{key_prefix}"
         )
         st.session_state.duration_val = duration_input
-        
-        st.caption(L["presets_lbl"])
-        b1, b2, b3, b4 = st.columns(4)
-        if b1.button(L["m30"], key=f"b30_{key_prefix}", use_container_width=True): 
-            st.session_state.duration_val = 0.5
-            st.rerun()
-        if b2.button(L["h1"], key=f"b1h_{key_prefix}", use_container_width=True): 
-            st.session_state.duration_val = 1.0
-            st.rerun()
-        if b3.button(L["h15"], key=f"b15_{key_prefix}", use_container_width=True): 
-            st.session_state.duration_val = 1.5
-            st.rerun()
-        if b4.button(L["h2"], key=f"b2h_{key_prefix}", use_container_width=True): 
-            st.session_state.duration_val = 2.0
-            st.rerun()
 
 @st.dialog(L["del_dialog_title"])
 def confirm_delete_dialog(indices, is_all=False):
@@ -477,7 +467,7 @@ if page == L["page_log"]:
         st.toast(L["success_toast"].format(final_activity), icon="🔥")
         st.rerun()
 
-    # السجل والممحاة الآمنة
+    # السجل المنظف والخالي من رموز السيريال والتعبيرات العشوائية
     if not df_db.empty:
         st.markdown("---")
         st.subheader(L["history_sub"])
