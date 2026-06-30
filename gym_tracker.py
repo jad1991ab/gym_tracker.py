@@ -86,9 +86,9 @@ def fix_google_serial_date(val):
         return ""
     val_str = str(val).strip()
     
-    # التحقق مما إذا كان التاريخ قد تحول إلى رقم تسلسلي عشري أو صحيح (مثل 46203.82)
+    # التحقق مما إذا كان التاريخ قد تحول إلى رقم تسلسلي عشري أو صحيح
     clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
-    if clean_numeric_check.isdigit() and len(val_str) < 15:
+    if clean_numeric_check.isdigit(): # تم إزالة شرط الطول هنا للإمساك بالأرقام الطويلة
         try:
             serial_num = float(val_str)
             # نقطة البداية لتاريخ إكسل وجوجل شيتس الافتراضي هو 30 ديسمبر 1899
