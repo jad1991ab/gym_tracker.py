@@ -4,6 +4,8 @@ import gspread
 import datetime
 import io
 import time
+import json
+import os
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit.components.v1 as components
@@ -14,16 +16,46 @@ from datetime import timedelta
 # إعدادات الصفحة الرسمية والتصميم
 st.set_page_config(page_title="متابع الأنشطة الاحترافي", layout="wide", page_icon="🟢")
 
+# ملف محلي لتخزين حالة العداد بشكل دائم ومقاوم للإغلاق والتحديث
+STATE_FILE = ".stopwatch_state.json"
+
+def load_stopwatch_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"running": False, "start_time": None, "elapsed": 0, "mode": "free", "duration_mins": 25}
+
+def save_stopwatch_state(running, start_time, elapsed, mode="free", duration_mins=25):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump({
+                "running": running,
+                "start_time": start_time,
+                "elapsed": elapsed,
+                "mode": mode,
+                "duration_mins": duration_mins
+            }, f)
+    except:
+        pass
+
+# تحميل الحالة المحفوظة سابقاً (مقاومة إغلاق المتصفح)
+saved_state = load_stopwatch_state()
+
 # ==========================================
-# ⚙️ تهيئة الـ Session State (قبل بناء أي ويدجت)
+# ⚙️ تهيئة الـ Session State
 # ==========================================
 if "duration_input" not in st.session_state:
     st.session_state.duration_input = 1.0
 
-if "stopwatch_running" not in st.session_state:
-    st.session_state.stopwatch_running = False
-    st.session_state.stopwatch_start = None
-    st.session_state.elapsed_time = 0
+if "sw_running" not in st.session_state:
+    st.session_state.sw_running = saved_state["running"]
+    st.session_state.sw_start = saved_state["start_time"]
+    st.session_state.sw_elapsed = saved_state["elapsed"]
+    st.session_state.sw_mode = saved_state["mode"] # free أو pomodoro
+    st.session_state.sw_pomo_mins = saved_state["duration_mins"]
 
 def set_duration(amount):
     st.session_state.duration_input = float(amount)
@@ -46,11 +78,9 @@ def get_sheet():
 
 sheet = get_sheet()
 
-# الأعمدة الرسمية الشاملة لعمود الملاحظات الجديد
 COLUMNS = ['ID', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق', 'الملاحظات']
 
 try:
-    # حل مشكلة تمديد حدود الأسطر والأعمدة لتفادي خطأ الـ grid limits (400)
     current_cols_count = sheet.col_count
     if current_cols_count < len(COLUMNS):
         sheet.add_cols(len(COLUMNS) - current_cols_count)
@@ -60,7 +90,6 @@ try:
         sheet.append_row(COLUMNS)
     else:
         if 'الملاحظات' not in first_row:
-            # تعديل آمن لعنوان العمود الأخير
             sheet.update_cell(1, len(COLUMNS), 'الملاحظات')
 except Exception as e:
     st.error(f"تنبيه قاعدة البيانات: {e}")
@@ -86,7 +115,6 @@ def save_data(df):
     try:
         clean_df = df[[c for c in COLUMNS if c in df.columns]].copy()
         sheet.clear()
-        # تمديد حجم جدول البيانات تلقائياً قبل الرفع للتأمين التام
         if sheet.row_count < len(clean_df) + 10:
             sheet.add_rows(len(clean_df) + 20)
         set_with_dataframe(sheet, clean_df, include_index=False, include_column_header=True, resize=True)
@@ -104,7 +132,6 @@ now = datetime.datetime.now()
 today_str = now.strftime('%Y-%m-%d')
 current_year = now.year
 
-# تجهيز البيانات للإحصائيات والرسومات البيانية
 if not df_db.empty:
     df_db_calc = df_db.copy()
     df_db_calc['تاريخ_صحيح'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
@@ -117,7 +144,7 @@ else:
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
 # ==========================================
-# 🧭 نظام القوائم والتنقل الجانبي لترتيب الواجهة
+# 🧭 نظام القوائم والتنقل الجانبي
 # ==========================================
 st.sidebar.title("🧭 قائمة التنقل")
 page = st.sidebar.radio("اختر الصفحة:", ["📥 تسجيل نشاط جديد", "📊 لوحة التحكم والإحصاءات"])
@@ -138,41 +165,86 @@ def render_duration_section(col_context):
 if page == "📥 تسجيل نشاط جديد":
     st.header("🟢 تسجيل ومتابعة الأنشطة")
     
-    # قسم ساعة الإيقاف الحيّة والذكية والموفرة للـ Quota
-    st.markdown("### ⏱️ ساعة الإيقاف والتركيز الحي")
+    # ⏱️ قسم العدادات المطور (ساعة إيقاف مستمرة + مؤقت بومودورو ذكي)
+    st.markdown("### ⏱️ نظام التركيز المطور (بومودورو وساعة الإيقاف الذكية)")
+    
+    # نظام تبديل الأنماط (يظهر فقط إذا كان العداد متوقفاً)
+    if not st.session_state.sw_running:
+        mode_choice = st.radio("اختر نظام التركيز:", ["⏱️ عداد حر تصاعدي", "🎯 مؤقت بومودورو (Pomodoro)"], horizontal=True)
+        st.session_state.sw_mode = "free" if "عداد حر" in mode_choice else "pomodoro"
+        if st.session_state.sw_mode == "pomodoro":
+            st.session_state.sw_pomo_mins = st.selectbox("اختر مدة جلسة التركيز (بالدقائق):", [25, 50, 15, 5], index=0)
+    else:
+        current_mode_text = "⏱️ عداد حر تصاعدي" if st.session_state.sw_mode == "free" else f"🎯 مؤقت بومودورو ({st.session_state.sw_pomo_mins} دقيقة)"
+        st.info(f"العداد يعمل حالياً بنظام: **{current_mode_text}** (محمي ضد إغلاق الصفحة 🔒)")
+
     stop_col1, stop_col2 = st.columns([2, 1])
     
     with stop_col1:
-        if not st.session_state.stopwatch_running:
-            if st.button("▶️ ابدأ نشاط حياً الآن (تشغيل العداد المستمر)", use_container_width=True):
-                st.session_state.stopwatch_running = True
-                st.session_state.stopwatch_start = time.time() - st.session_state.elapsed_time
+        if not st.session_state.sw_running:
+            if st.button("▶️ ابدأ التركيز الآن", use_container_width=True, type="primary"):
+                st.session_state.sw_running = True
+                st.session_state.sw_start = time.time() - st.session_state.sw_elapsed
+                save_stopwatch_state(True, st.session_state.sw_start, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
                 st.rerun()
         else:
-            st.session_state.elapsed_time = time.time() - st.session_state.stopwatch_start
-            if st.button("⏸️ إنهاء النشاط المباشر وتعبئة الوقت المكتسب تلقائياً", use_container_width=True, type="primary"):
-                st.session_state.stopwatch_running = False
-                calc_hours = round(st.session_state.elapsed_time / 3600, 2)
-                st.session_state.duration_input = max(calc_hours, 0.1)
-                st.toast(f"📥 تم تحديث حقل المدة بالأسفل بـ {st.session_state.duration_input} ساعة!", icon="⏱️")
-                st.rerun()
+            # حساب الوقت المنقضي
+            current_elapsed = time.time() - st.session_state.sw_start
+            
+            if st.session_state.sw_mode == "pomodoro":
+                target_seconds = st.session_state.sw_pomo_mins * 60
+                # التحقق مما إذا انتهى وقت البومودورو تلقائياً
+                if current_elapsed >= target_seconds:
+                    st.session_state.sw_running = False
+                    st.session_state.sw_elapsed = 0
+                    st.session_state.duration_input = round(st.session_state.sw_pomo_mins / 60, 2)
+                    save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
+                    st.balloons()
+                    st.audio("https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg") # صوت تنبيه جاهز
+                    st.success("🎉 أحسنت! انتهت جلسة البومودورو بنجاح. تم ملء الوقت بالأسفل تلقائياً وجاهز للحفظ.")
+                
+            if st.session_state.sw_running:
+                if st.button("⏸️ إنهاء الجلسة الحالية وتعبئة الوقت المكتسب", use_container_width=True):
+                    st.session_state.sw_running = False
+                    st.session_state.sw_elapsed = current_elapsed
+                    
+                    if st.session_state.sw_mode == "free":
+                        calc_hours = round(current_elapsed / 3600, 2)
+                    else:
+                        calc_hours = round(current_elapsed / 3600, 2)
+                        
+                    st.session_state.duration_input = max(calc_hours, 0.1)
+                    save_stopwatch_state(False, None, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
+                    st.toast(f"📥 تم تحديث حقل المدة بالأسفل بـ {st.session_state.duration_input} ساعة!", icon="⏱️")
+                    st.rerun()
                 
     with stop_col2:
-        if st.session_state.stopwatch_running:
-            st.session_state.elapsed_time = time.time() - st.session_state.stopwatch_start
-            mins, secs = divmod(int(st.session_state.elapsed_time), 60)
-            hrs, mins = divmod(mins, 60)
-            st.metric("⏳ العداد يعمل حالياً", f"{hrs:02d}:{mins:02d}:{secs:02d}")
+        if st.session_state.sw_running:
+            current_elapsed = time.time() - st.session_state.sw_start
+            
+            if st.session_state.sw_mode == "free":
+                # عداد تصاعدي
+                mins, secs = divmod(int(current_elapsed), 60)
+                hrs, mins = divmod(mins, 60)
+                st.metric("⏳ العداد المستمر يعمل", f"{hrs:02d}:{mins:02d}:{secs:02d}")
+            else:
+                # بومودورو تنازلي
+                target_seconds = st.session_state.sw_pomo_mins * 60
+                remaining_seconds = max(int(target_seconds - current_elapsed), 0)
+                rem_mins, rem_secs = divmod(remaining_seconds, 60)
+                st.metric("🎯 متبقي على نهاية الجلسة", f"{rem_mins:02d}:{rem_secs:02d}")
+                
             time.sleep(1)
             st.rerun()
         else:
-            if st.session_state.elapsed_time > 0:
-                mins, secs = divmod(int(st.session_state.elapsed_time), 60)
+            if st.session_state.sw_elapsed > 0:
+                mins, secs = divmod(int(st.session_state.sw_elapsed), 60)
                 hrs, mins = divmod(mins, 60)
                 st.metric("⏱️ الوقت المسجل الجاهز", f"{hrs:02d}:{mins:02d}:{secs:02d}")
-                if st.button("🔄 إعادة تصفير ساعة الإيقاف"):
-                    st.session_state.elapsed_time = 0
+                if st.button("🔄 تصفير وإعادة تعيين"):
+                    st.session_state.sw_elapsed = 0
                     st.session_state.duration_input = 1.0
+                    save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
                     st.rerun()
 
     st.markdown("---")
@@ -199,7 +271,7 @@ if page == "📥 تسجيل نشاط جديد":
             selected_activity = st.selectbox("النشاط", activities_list, key="act_auto")
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="cust_auto")
-            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أرجل، إنهاء الفصل الثالث", key="notes_auto")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: تمرين أكتاف، بومودورو برمجة التطبيق", key="notes_auto")
         render_duration_section(c2)
     else:
         c1, c2, c3 = st.columns([2, 1.5, 1.5])
@@ -207,7 +279,7 @@ if page == "📥 تسجيل نشاط جديد":
             selected_activity = st.selectbox("النشاط", activities_list, key="act_manual")
             if selected_activity == "➕ إضافة نشاط مخصص...":
                 custom_activity = st.text_input("اكتب اسم النشاط الجديد هنا:", key="cust_manual")
-            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: مراجعة كاملة للمشروع", key="notes_manual")
+            activity_notes = st.text_input("✍️ ملاحظات وتعليقات على النشاط (اختياري):", placeholder="مثال: مراجعة شاملة للملفات القديمة", key="notes_manual")
         render_duration_section(c1)
         with c2:
             target_date = st.date_input("اختر التاريخ من التقويم 📅", value=now.date())
@@ -267,7 +339,6 @@ if page == "📥 تسجيل نشاط جديد":
         st.toast(f"✅ تم تسجيل نشاط ({final_activity}) بنجاح!", icon="🔥")
         st.rerun()
 
-    # سجل التحكم والحذف الفوري والتصدير
     if not df_db.empty:
         st.markdown("---")
         st.subheader("📋 سجل التحكم بالبيانات وحذف الأسطر")
@@ -306,7 +377,7 @@ if page == "📥 تسجيل نشاط جديد":
         st.markdown("---")
         if st.button("🚨 مسح السجل بالكامل والبدء من جديد"):
             sheet.clear()
-            sheet.append_row(COLUMNS[:9]) # إعادة التصفير الأساسي للأعمدة القديمة للتوافق
+            sheet.append_row(COLUMNS[:9])
             st.cache_data.clear()
             st.session_state.db = pd.DataFrame(columns=COLUMNS)
             st.success("تم تصفير قاعدة البيانات بنجاح!")
@@ -354,7 +425,6 @@ elif page == "📊 لوحة التحكم والإحصاءات":
             best = max(best, temp)
         best_streak = best
 
-    # نظام الإنجازات
     achievements = [
         ("🌱", "البداية", activities_count >= 1),
         ("⏱️", "أول 10 ساعات", total_hours >= 10),
