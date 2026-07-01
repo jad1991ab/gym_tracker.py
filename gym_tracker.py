@@ -58,9 +58,47 @@ def load_users_db():
     except:
         return pd.DataFrame(columns=["Username", "Password", "Role"])
 
-# دالة ذكية ومحدثة لإصلاح تواريخ وساعات جوجل شيت ومنع التناقض والتداخل
+
 # دالة ذكية ومحدثة لإصلاح تواريخ وساعات جوجل شيت ومنع التناقض والتداخل
 def fix_google_serial_date(val, is_time_only=False):
+    if not val or pd.isna(val):
+        return ""
+    val_str = str(val).strip()
+    
+    # التحقق مما إذا كانت القيمة بتنسيق الوقت النصي العادي (ساعة:دقيقة:ثانية أو ساعة:دقيقة)
+    if is_time_only and (":" in val_str):
+        try:
+            # تنظيف السلسلة النصية وتحويلها لتنسيق موحد HH:MM:SS
+            parts = val_str.split(":")
+            if len(parts) == 2:
+                return f"{int(parts[0]):02d}:{int(parts[1]):02d}:00"
+            elif len(parts) == 3:
+                return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
+        except:
+            pass
+
+    clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
+    if clean_numeric_check.isdigit():
+        try:
+            serial_num = float(val_str)
+            base_date = datetime.datetime(1899, 12, 30)
+            
+            if is_time_only:
+                # عزل الجزء العشري النقي لحساب الوقت بدقة
+                fraction = serial_num - int(serial_num) if serial_num >= 1 else serial_num
+                total_seconds = int(round(fraction * 86400))
+                hours = total_seconds // 3600
+                minutes = (total_seconds % 3600) // 60
+                seconds = total_seconds % 60
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            else:
+                # استخراج التاريخ النقي بدون أي ساعات زائدة
+                days_to_add = int(serial_num)
+                converted_dt = base_date + datetime.timedelta(days=days_to_add)
+                return converted_dt.strftime('%Y-%m-%d')
+        except:
+            pass
+    return val_str
     if not val or pd.isna(val):
         return ""
     val_str = str(val).strip()
