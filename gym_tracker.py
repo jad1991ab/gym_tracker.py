@@ -17,34 +17,11 @@ from datetime import timedelta
 # تهيئة الصفحة الرسمية للتطبيق
 st.set_page_config(page_title="Activity Tracker Multi-User", layout="wide", page_icon="🟢")
 
-STATE_FILE = ".stopwatch_state.json"
 OFFLINE_CACHE_FILE = ".offline_cache.json"
-
-def load_stopwatch_state():
-    if os.path.exists(STATE_FILE):
-        try:
-            with open(STATE_FILE, "r") as f: return json.load(f)
-        except: pass
-    return {"running": False, "start_time": None, "elapsed": 0, "mode": "free", "duration_mins": 25}
-
-def save_stopwatch_state(running, start_time, elapsed, mode="free", duration_mins=25):
-    try:
-        with open(STATE_FILE, "w") as f:
-            json.dump({"running": running, "start_time": start_time, "elapsed": elapsed, "mode": mode, "duration_mins": duration_mins}, f)
-    except: pass
-
-saved_state = load_stopwatch_state()
 
 # تهيئة قيم الجلسة الآمنة
 if "duration_val" not in st.session_state:
     st.session_state.duration_val = 1.0
-
-if "sw_running" not in st.session_state:
-    st.session_state.sw_running = saved_state["running"]
-    st.session_state.sw_start = saved_state["start_time"]
-    st.session_state.sw_elapsed = saved_state["elapsed"]
-    st.session_state.sw_mode = saved_state["mode"]
-    st.session_state.sw_pomo_mins = saved_state["duration_mins"]
 
 def make_hashes(password): 
     return hashlib.sha256(str.encode(password)).hexdigest()
@@ -81,19 +58,31 @@ def load_users_db():
     except:
         return pd.DataFrame(columns=["Username", "Password", "Role"])
 
-# دالة ذكية لإصلاح تواريخ جوجل شيت المشوهة (Serial Numbers) وتحويلها لتاريخ حقيقي
-def fix_google_serial_date(val):
+# دالة ذكية ومحدثة لإصلاح تواريخ وساعات جوجل شيت المشوهة (Serial Numbers) بدون قيود على الطول
+def fix_google_serial_date(val, is_time_only=False):
     if not val or pd.isna(val):
         return ""
     val_str = str(val).strip()
     
+    # تنظيف التحقق الرقمي ليشمل الأرقام العشرية الطويلة جداً الموضحة في صورة image_9c997f.png
     clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
-    if clean_numeric_check.isdigit() and len(val_str) < 15:
+    if clean_numeric_check.isdigit():
         try:
             serial_num = float(val_str)
             base_date = datetime.datetime(1899, 12, 30)
             converted_dt = base_date + datetime.timedelta(days=serial_num)
-            return converted_dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            if is_time_only:
+                # إذا كان الرقم يمثل كسر اليوم العشري فقط (الساعة)
+                if serial_num < 1:
+                    total_seconds = int(serial_num * 86400)
+                    hours = total_seconds // 3600
+                    minutes = (total_seconds % 3600) // 60
+                    seconds = total_seconds % 60
+                    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                return converted_dt.strftime('%H:%M:%S')
+            else:
+                return converted_dt.strftime('%Y-%m-%d %H:%M:%S')
         except:
             pass
     return val_str
@@ -112,16 +101,17 @@ def load_data():
             if col not in df.columns: 
                 df[col] = ""
         
+        # تطبيق الإصلاح الجذري على الأعمدة المتضررة
         if 'التاريخ' in df.columns:
-            df['التاريخ'] = df['التاريخ'].apply(fix_google_serial_date)
+            df['التاريخ'] = df['التاريخ'].apply(lambda x: fix_google_serial_date(x, is_time_only=False))
         if 'الساعة' in df.columns:
-            df['الساعة'] = df['الساعة'].apply(lambda x: fix_google_serial_date(x).split(' ')[-1] if (str(x).replace('.','',1).isdigit() and '.' in str(x)) else x)
+            df['الساعة'] = df['الساعة'].apply(lambda x: fix_google_serial_date(x, is_time_only=True))
                 
         return df[COLUMNS]
     except Exception as e:
         return pd.DataFrame(columns=COLUMNS)
 
-# دالة مطورة تدعم الكاش المحلي في حال انقطاع الشبكة
+# دالة حفظ البيانات مع نظام الكاش الاحتياطي
 def save_data(df):
     try:
         clean_df = df[COLUMNS].copy()
@@ -160,12 +150,12 @@ def sync_offline_cache():
             with open(OFFLINE_CACHE_FILE, "r", encoding="utf-8") as f:
                 cached_rows = json.load(f)
             if cached_rows:
-                st.info(f"🔄 تم اكتشاف {len(cached_rows)} أنشطة محفوظة محلياً أثناء انقطاع الإنترنت، جاري المزامنة مع السيرفر...")
+                st.info(f"🔄 تم اكتشاف {len(cached_rows)} أنشطة محفوظة محلياً أثناء انقطاع الإنترنت، جاري المزامنة...")
                 current_df = load_data()
                 new_df = pd.concat([current_df, pd.DataFrame(cached_rows)], ignore_index=True)
                 if save_data(new_df):
                     os.remove(OFFLINE_CACHE_FILE)
-                    st.success("✅ تمت مزامنة كافة الأنشطة المحلية بنجاح مع جوجل شيتس!")
+                    st.success("✅ تمت مزامنة كافة الأنشطة المحلية بنجاح!")
                     time.sleep(1)
                     st.rerun()
         except Exception as e:
@@ -184,10 +174,7 @@ LEXICON = {
         "duration_lbl": "مدة النشاط (بالساعات)", 
         "del_dialog_title": "⚠️ تأكيد عملية الحذف", "del_all_warn": "🚨 هل أنت متأكد تماماً؟ لا يمكن التراجع عن هذا الإجراء!", "del_all_btn": "❌ نعم، امسح السجل بالكامل",
         "del_sel_warn": "هل أنت متأكد أنك تريد حذف الأنشطة المحددة؟ العدد:", "del_sel_btn": "🗑️ تأكيد الحذف النهائي", "log_header": "🟢 تسجيل ومتابعة الأنشطة",
-        "focus_hub": "⏱️ نظام التركيز المطور (ساعة الإيقاف)", "focus_sys": "اختر نظام التركيز:", "f_sw": "⏱️ عداد حر تصاعدي", "f_pomo": "🎯 مؤقت بومودورو (Pomodoro)",
-        "pomo_sel": "اختر مدة جلسة التركيز (بالدقائق):", "sw_active": "العداد يعمل حالياً بنظام:", "sw_start_btn": "▶️ ابدأ التركيز الآن", "sw_stop_btn": "⏸️ إنهاء الجلسة وتعبئة الوقت",
-        "sw_running_lbl": "⏳ العداد المستمر يعمل", "sw_remaining_lbl": "🎯 متبقي على النهاية", "pomo_done": "🎉 انتهت جلسة البومودورو بنجاح!",
-        "sw_ready": "⏱️ الوقت المسجل الجاهز", "sw_reset": "🔄 تصفير وإعادة تعيين", "form_sub": "📥 نموذج البيانات والملء الذكي",
+        "form_sub": "📥 نموذج البيانات والملء الذكي",
         "form_auto": "التسجيل التلقائي بالوقت والتاريخ الحالي فوراً ⚡", "act_cat": "النشاط", "act_custom_opt": "➕ إضافة نشاط مخصص...", "act_custom_lbl": "اكتب اسم النشاط الجديد هنا:",
         "notes_lbl": "✍️ ملاحظات وتعليقات على النشاط (اختياري):", "notes_ph": "مثال: تمرين، برمجة التطبيق", "notes_ph_manual": "مثال: مراجعة كاملة للملفات القديمة",
         "cal_lbl": "اختر التاريخ من التقويم 📅", "clock_lbl": "اضبط وقت النشاط ⌚", "submit_btn": "➕ تسجيل النشاط وحفظه تلقائياً", "success_toast": "✅ تم تسجيل نشاط ({}) بنجاح!",
@@ -199,8 +186,7 @@ LEXICON = {
         "metric_curr_streak": "🔥 السلسلة الحالية", "metric_max_streak": "🏆 أطول سلسلة (Streak)", "metric_scoped_hrs": "⏱ إجمالي الساعات", "metric_entries": "📋 عدد الأنشطة", "metric_today_vol": "🎯 ساعات اليوم", "metric_dominant": "⭐ الأكثر تفضيلاً",
         "days_unit": "يوم", "hours_unit": "س", "radar_sub": "🎯 رادار الأهداف الذكية ومعدلات الإنجاز", "r_daily": "الهدف اليومي", "r_weekly": "الهدف الأسبوعي", "r_monthly": "الهدف الشهري", "r_comp": "من الهدف",
         "grid_sub": "🧱 مخطط الالتزام السنوي المفلتر (GitHub Grid)", "pie_sub": "🍕 التوزيع النظري للأنشطة", "pie_empty": "لا توجد أنشطة مسجلة في هذا النطاق الزمني لعرض توزيعها.",
-        "trend_sub": "📈 منحنى تطور الأداء وحجم الساعات", "trend_empty": "أدخل بيانات أو وسّع النقاط لمشاهدة خط التطور.",
-        "ach_sub": "🏆 قائمة الإنجازات المفتوحة (دائمة)", "ach_comp": "(مكتمل)", "ach_prog": "(قيد التقدم)", "gym_def": "الدراسة 📚", "study_def": "النادي 🏋️‍♂️", "work_def": "العمل 💼", "custom_err": "يرجى كتابة اسم النشاط المخصص أولاً!",
+        "gym_def": "الدراسة 📚", "study_def": "النادي 🏋️‍♂️", "work_def": "العمل 💼", "custom_err": "يرجى كتابة اسم النشاط المخصص أولاً!",
         "login_title": "🔒 نظام تسجيل الدخول الموحد", "username_lbl": "اسم المستخدم", "password_lbl": "كلمة المرور", "login_btn": "🚪 تسجيل الدخول", "logout_btn": "🚪 تسجيل الخروج", "invalid_login": "❌ اسم المستخدم أو كلمة المرور غير صحيحة",
         "admin_scope": "🔍 استعراض بيانات مستخدم محدد (نطاق المدير):", "all_users_opt": "👥 كل المستخدمين معاً", "create_user_sub": "➕ إنشاء حساب مستخدم جديد", "new_user_lbl": "اسم المستخدم الجديد", "new_pass_lbl": "كلمة المرور الجديدة", "role_lbl": "الصلاحية", "create_btn": "💼 إنشاء الحساب وحفظه برمز مشفر"
     },
@@ -210,10 +196,7 @@ LEXICON = {
         "duration_lbl": "Activity Duration (Hours)",
         "del_dialog_title": "⚠️ Confirm Deletion", "del_all_warn": "🚨 Are you absolutely sure? This action cannot be undone!", "del_all_btn": "❌ Yes, wipe all data",
         "del_sel_warn": "Are you sure you want to permanently delete the selected activities? Count:", "del_sel_btn": "🗑️ Confirm Permanent Delete", "log_header": "🟢 Track & Log Activities",
-        "focus_hub": "⏱️ Focus Hub (Stopwatch Engine)", "focus_sys": "Focus System:", "f_sw": "⏱️ Standard Stopwatch", "f_pomo": "🎯 Pomodoro Timer",
-        "pomo_sel": "Select Session Duration (Minutes):", "sw_active": "Active Session:", "sw_start_btn": "▶️ Start Focus Session Now", "sw_stop_btn": "⏸️ Complete Current Session & Populate Time",
-        "sw_running_lbl": "⏳ Stopwatch Running", "sw_remaining_lbl": "🎯 Remaining Time", "pomo_done": "🎉 Pomodoro session complete.",
-        "sw_ready": "⏱️ Pending Tracked Time", "sw_reset": "🔄 Reset Timer", "form_sub": "📥 Input Form & Smart Prefills",
+        "form_sub": "📥 Input Form & Smart Prefills",
         "form_auto": "⚡ Real-time instant stamping (Current time & date)", "act_cat": "Activity Category", "act_custom_opt": "➕ Add Custom Activity...", "act_custom_lbl": "Enter custom activity name:",
         "notes_lbl": "✍️ Notes & Comments (Optional):", "notes_ph": "e.g., Workout, coding app block", "notes_ph_manual": "e.g., Extensive review of legacy assets",
         "cal_lbl": "Select Calendar Date 📅", "clock_lbl": "Set Timestamp ⌚", "submit_btn": "➕ Submit & Log Activity", "success_toast": "✅ Activity ({}) successfully logged!",
@@ -225,8 +208,7 @@ LEXICON = {
         "metric_curr_streak": "🔥 Current Streak", "metric_max_streak": "🏆 Longest Streak", "metric_scoped_hrs": "⏱️ Scoped Duration", "metric_entries": "📋 Log Entries Count", "metric_today_vol": "🎯 Today's Volume", "metric_dominant": "⭐ Dominant Activity",
         "days_unit": "Days", "hours_unit": "Hrs", "radar_sub": "🎯 Smart Goals Objective Monitor", "r_daily": "Daily Target", "r_weekly": "Weekly Target", "r_monthly": "Monthly Target", "r_comp": "Completed",
         "grid_sub": "🧱 Annual Consistency Grid", "pie_sub": "🍕 Allocation Distribution", "pie_empty": "No distribution entries found inside current evaluation range.",
-        "trend_sub": "📈 Performance Trend Evolution", "trend_empty": "Log additional activities or expand timeline criteria to map progress charts.",
-        "ach_sub": "🏆 Permanent Achievement Milestones", "ach_comp": "(Unlocked)", "ach_prog": "(In Progress)", "gym_def": "Studying 📚", "study_def": "Gym 🏋️‍♂️", "work_def": "Work 💼", "custom_err": "Please enter a custom activity label first!",
+        "gym_def": "Studying 📚", "study_def": "Gym 🏋️‍♂️", "work_def": "Work 💼", "custom_err": "Please enter a custom activity label first!",
         "login_title": "🔒 Secure Unified Login System", "username_lbl": "Username", "password_lbl": "Password", "login_btn": "🚪 Sign In", "logout_btn": "🚪 Log Out", "invalid_login": "❌ Invalid Username or Password",
         "admin_scope": "🔍 Review specific user logs (Admin Scope):", "all_users_opt": "👥 All Users Combined", "create_user_sub": "➕ Create New User Account", "new_user_lbl": "New Username", "new_pass_lbl": "New Password", "role_lbl": "Role", "create_btn": "💼 Register Encrypted User Account"
     }
@@ -347,74 +329,10 @@ else:
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
 # ==========================================
-# 1. شاشة تسجيل الأنشطة
+# 1. شاشة تسجيل الأنشطة (بدون نظام ساعة الإيقاف)
 # ==========================================
 if page == L["page_log"]:
     st.header(L["log_header"])
-    st.markdown(f"### {L['focus_hub']}")
-    
-    if not st.session_state.sw_running:
-        mode_choice = st.radio(L["focus_sys"], [L["f_sw"], L["f_pomo"]], horizontal=True)
-        st.session_state.sw_mode = "free" if mode_choice == L["f_sw"] else "pomodoro"
-        if st.session_state.sw_mode == "pomodoro":
-            st.session_state.sw_pomo_mins = st.selectbox(L["pomo_sel"], [25, 50, 15, 5], index=0)
-    else:
-        current_mode_text = L["f_sw"] if st.session_state.sw_mode == "free" else f"{L['f_pomo']} ({st.session_state.sw_pomo_mins})"
-        st.info(f"{L['sw_active']} **{current_mode_text}** 🔒")
-
-    stop_col1, stop_col2 = st.columns([2, 1])
-    
-    with stop_col1:
-        if not st.session_state.sw_running:
-            if st.button(L["sw_start_btn"], use_container_width=True, type="primary"):
-                st.session_state.sw_running = True
-                st.session_state.sw_start = time.time() - st.session_state.sw_elapsed
-                save_stopwatch_state(True, st.session_state.sw_start, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
-                st.rerun()
-        else:
-            current_elapsed = time.time() - st.session_state.sw_start
-            if st.session_state.sw_mode == "pomodoro":
-                target_seconds = st.session_state.sw_pomo_mins * 60
-                if current_elapsed >= target_seconds:
-                    st.session_state.sw_running = False
-                    st.session_state.sw_elapsed = 0
-                    st.session_state.duration_val = round(st.session_state.sw_pomo_mins / 60, 2)
-                    save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
-                    st.balloons()
-                
-            if st.session_state.sw_running:
-                if st.button(L["sw_stop_btn"], use_container_width=True):
-                    st.session_state.sw_running = False
-                    st.session_state.sw_elapsed = current_elapsed
-                    calc_hours = round(current_elapsed / 3600, 2)
-                    st.session_state.duration_val = max(calc_hours, 0.1)
-                    save_stopwatch_state(False, None, st.session_state.sw_elapsed, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
-                    st.rerun()
-                
-    with stop_col2:
-        if st.session_state.sw_running:
-            current_elapsed = time.time() - st.session_state.sw_start
-            if st.session_state.sw_mode == "free":
-                mins, secs = divmod(int(current_elapsed), 60)
-                hrs, mins = divmod(mins, 60)
-                st.metric(L["sw_running_lbl"], f"{hrs:02d}:{mins:02d}:{secs:02d}")
-            else:
-                target_seconds = st.session_state.sw_pomo_mins * 60
-                remaining_seconds = max(int(target_seconds - current_elapsed), 0)
-                rem_mins, rem_secs = divmod(remaining_seconds, 60)
-                st.metric(L["sw_remaining_lbl"], f"{rem_mins:02d}:{rem_secs:02d}")
-        else:
-            if st.session_state.sw_elapsed > 0:
-                mins, secs = divmod(int(st.session_state.sw_elapsed), 60)
-                hrs, mins = divmod(mins, 60)
-                st.metric(L["sw_ready"], f"{hrs:02d}:{mins:02d}:{secs:02d}")
-                if st.button(L["sw_reset"]):
-                    st.session_state.sw_elapsed = 0
-                    st.session_state.duration_val = 1.0
-                    save_stopwatch_state(False, None, 0, st.session_state.sw_mode, st.session_state.sw_pomo_mins)
-                    st.rerun()
-
-    st.markdown("---")
     st.subheader(L["form_sub"])
     auto_time = st.toggle(L["form_auto"], value=True)
 
@@ -493,7 +411,6 @@ if page == L["page_log"]:
         
         updated_df_all = pd.concat([df_db_all, pd.DataFrame([new_row])], ignore_index=True)
         
-        # محاولة الحفظ الآمن مع تفعيل الكاش المحلي عند الفشل
         success = save_data(updated_df_all)
         if not success:
             cache_offline_activity(new_row)
@@ -679,7 +596,6 @@ elif page == L["page_dash"]:
 elif page == L["page_admin"] and st.session_state.user_role == "Admin":
     st.header("👑 لوحة تحكم وصلاحيات الإدارة الفائقة")
     
-    # تبويبات لتنظيم لوحة التحكم الخاصة بالمسؤول
     admin_tab1, admin_tab2, admin_tab3 = st.tabs(["👥 الحسابات والتعيين", "🔒 استعادة كلمات المرور", "📋 سجل الأنشطة العام"])
     
     with admin_tab1:
@@ -715,7 +631,6 @@ elif page == L["page_admin"] and st.session_state.user_role == "Admin":
         
         users_df = load_users_db()
         if not users_df.empty:
-            # فلترة قائمة الاختيارات لاستبعاد حساب الـ admin الحالي من التصفير الذاتي منعاً للأخطاء
             reset_user_list = [u for u in users_df["Username"].unique() if u != st.session_state.username]
             
             if reset_user_list:
@@ -727,19 +642,16 @@ elif page == L["page_admin"] and st.session_state.user_role == "Admin":
                         st.error("لا يمكن ترك حقل كلمة المرور فارغاً!")
                     else:
                         try:
-                            # جلب كافة السجلات والبحث عن سطر المستخدم لتعديله
                             all_user_records = sheet_users.get_all_records()
                             row_index_to_update = None
                             
-                            # البحث عن رقم السطر المقابل (gspread يبدأ السطر من 1 والترويسة تأخذ السطر 1)
                             for idx, record in enumerate(all_user_records):
                                 if record["Username"] == selected_reset_user:
-                                    row_index_to_update = idx + 2  # +2 لمراعاة الترويسة وبدء الفهرسة من 1
+                                    row_index_to_update = idx + 2
                                     break
                             
                             if row_index_to_update:
                                 new_hashed_pwd = make_hashes(new_temp_password.strip())
-                                # تعديل خلية الباسورد (وهي العمود الثاني في ورقة شيت Users)
                                 sheet_users.update_cell(row_index_to_update, 2, new_hashed_pwd)
                                 st.cache_data.clear()
                                 st.success(f"✅ تم تحديث كلمة مرور الحساب '{selected_reset_user}' بنجاح!")
