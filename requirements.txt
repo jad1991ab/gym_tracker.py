@@ -1,6 +1,6 @@
 streamlit
 pandas
-gspread
+pip install supabase
 google-auth
 gspread-dataframe
 openpyxl
