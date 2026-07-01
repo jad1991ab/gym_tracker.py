@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import gspread
 import datetime
 import io
 import time
@@ -10,14 +9,12 @@ import hashlib
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit.components.v1 as components
-from google.oauth2.service_account import Credentials
-from gspread_dataframe import set_with_dataframe
 from datetime import timedelta
+# استدعاء مكتبة Supabase الرسمية
+from supabase import create_client, Client
 
 # تهيئة الصفحة الرسمية للتطبيق
 st.set_page_config(page_title="Activity Tracker Multi-User", layout="wide", page_icon="🟢")
-
-OFFLINE_CACHE_FILE = ".offline_cache.json"
 
 # تهيئة قيم الجلسة الآمنة
 if "duration_val" not in st.session_state:
@@ -26,228 +23,68 @@ if "duration_val" not in st.session_state:
 def make_hashes(password): 
     return hashlib.sha256(str.encode(password)).hexdigest()
 
-# تعيين صلاحيات جوجل درايف وجوجل شيتس
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-
+# --------------------------------------------------
+# 🛠️ دالة الاتصال بقاعدة بيانات Supabase
+# --------------------------------------------------
 @st.cache_resource
-def get_spreadsheet():
-    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
-    client = gspread.authorize(creds)
-    sheet_name = st.secrets["google"]["sheet_name"]
-    return client.open(sheet_name)
+def get_supabase_client() -> Client:
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
 
-spreadsheet = get_spreadsheet()
-sheet_main = spreadsheet.sheet1
+supabase = get_supabase_client()
 
-# التحقق من وجود ورقة المستخدمين
-try:
-    sheet_users = spreadsheet.worksheet("Users")
-except gspread.exceptions.WorksheetNotFound:
-    sheet_users = spreadsheet.add_worksheet(title="Users", rows="100", cols="5")
-    sheet_users.append_row(["Username", "Password", "Role"])
-    sheet_users.append_row(["admin", make_hashes("admin123"), "Admin"])
+# الهيكل الثابت للأعمدة (بالإنجليزية لتتوافق مع Supabase)
+COLUMNS = ['id', 'username', 'activity_date', 'year', 'month', 'week', 'weekday', 'activity_time', 'activity_name', 'duration_minutes', 'notes']
 
-# الهيكل الثابت للأعمدة المطلوبة
-COLUMNS = ['ID', 'المستخدم', 'التاريخ', 'السنة', 'الشهر', 'الأسبوع', 'اليوم', 'الساعة', 'النشاط', 'المدة_بالدقائق', 'الملاحظات']
-
-@st.cache_data(ttl=15)
-def load_users_db():
+# --------------------------------------------------
+# 🔒 دالات إدارة المستخدمين ونظام تسجيل الدخول (آمن وموسع)
+# --------------------------------------------------
+def check_user_login(user_input, hashed_input):
     try:
-        records = sheet_users.get_all_records()
-        return pd.DataFrame(records)
+        # استعلام دقيق: نبحث فقط عن السطر المطابق للمستخدم الحالي مباشرة في السيرفر (حل الثغرة الأمنية)
+        response = supabase.table("users").select("*").eq("username", user_input).eq("password", hashed_input).execute()
+        return pd.DataFrame(response.data)
+    except Exception as e:
+        st.error(f"خطأ أثناء التحقق من الحساب: {e}")
+        return pd.DataFrame()
+
+def get_all_users_admin():
+    try:
+        response = supabase.table("users").select("username", "role").execute()
+        return pd.DataFrame(response.data)
     except:
-        return pd.DataFrame(columns=["Username", "Password", "Role"])
+        return pd.DataFrame(columns=["username", "role"])
 
-
-# دالة ذكية ومحدثة لإصلاح تواريخ وساعات جوجل شيت ومنع التناقض والتداخل
-def fix_google_serial_date(val, is_time_only=False):
-    if not val or pd.isna(val):
-        return ""
-    val_str = str(val).strip()
-    
-    # التحقق مما إذا كانت القيمة بتنسيق الوقت النصي العادي (ساعة:دقيقة:ثانية أو ساعة:دقيقة)
-    if is_time_only and (":" in val_str):
-        try:
-            # تنظيف السلسلة النصية وتحويلها لتنسيق موحد HH:MM:SS
-            parts = val_str.split(":")
-            if len(parts) == 2:
-                return f"{int(parts[0]):02d}:{int(parts[1]):02d}:00"
-            elif len(parts) == 3:
-                return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
-        except:
-            pass
-
-    clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
-    if clean_numeric_check.isdigit():
-        try:
-            serial_num = float(val_str)
-            base_date = datetime.datetime(1899, 12, 30)
-            
-            if is_time_only:
-                # عزل الجزء العشري النقي لحساب الوقت بدقة
-                fraction = serial_num - int(serial_num) if serial_num >= 1 else serial_num
-                total_seconds = int(round(fraction * 86400))
-                hours = total_seconds // 3600
-                minutes = (total_seconds % 3600) // 60
-                seconds = total_seconds % 60
-                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            else:
-                # استخراج التاريخ النقي بدون أي ساعات زائدة
-                days_to_add = int(serial_num)
-                converted_dt = base_date + datetime.timedelta(days=days_to_add)
-                return converted_dt.strftime('%Y-%m-%d')
-        except:
-            pass
-    return val_str
-    if not val or pd.isna(val):
-        return ""
-    val_str = str(val).strip()
-    
-    # التحقق مما إذا كانت القيمة بتنسيق الوقت النصي العادي (ساعة:دقيقة:ثانية أو ساعة:دقيقة)
-    if is_time_only and (":" in val_str):
-        try:
-            # تنظيف السلسلة النصية وتحويلها لتنسيق موحد HH:MM:SS
-            parts = val_str.split(":")
-            if len(parts) == 2:
-                return f"{int(parts[0]):02d}:{int(parts[1]):02d}:00"
-            elif len(parts) == 3:
-                return f"{int(parts[0]):02d}:{int(parts[1]):02d}:{int(parts[2]):02d}"
-        except:
-            pass
-
-    clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
-    if clean_numeric_check.isdigit():
-        try:
-            serial_num = float(val_str)
-            base_date = datetime.datetime(1899, 12, 30)
-            
-            if is_time_only:
-                # عزل الجزء العشري النقي لحساب الوقت بدقة
-                fraction = serial_num - int(serial_num) if serial_num >= 1 else serial_num
-                total_seconds = int(round(fraction * 86400))
-                hours = total_seconds // 3600
-                minutes = (total_seconds % 3600) // 60
-                seconds = total_seconds % 60
-                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            else:
-                # استخراج التاريخ النقي بدون أي ساعات زائدة
-                days_to_add = int(serial_num)
-                converted_dt = base_date + datetime.timedelta(days=days_to_add)
-                return converted_dt.strftime('%Y-%m-%d')
-        except:
-            pass
-    return val_str
-    if not val or pd.isna(val):
-        return ""
-    val_str = str(val).strip()
-    
-    clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
-    if clean_numeric_check.isdigit():
-        try:
-            serial_num = float(val_str)
-            base_date = datetime.datetime(1899, 12, 30)
-            
-            if is_time_only:
-                # عزل الجزء العشري فقط لحساب الوقت النقي
-                if serial_num < 1:
-                    fraction = serial_num
-                else:
-                    fraction = serial_num - int(serial_num)
-                total_seconds = int(round(fraction * 86400))
-                hours = total_seconds // 3600
-                minutes = (total_seconds % 3600) // 60
-                seconds = total_seconds % 60
-                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-            else:
-                # عزل الجزء الصحيح فقط لاستخراج التاريخ النقي بدون أي ساعات زائدة
-                days_to_add = int(serial_num)
-                converted_dt = base_date + datetime.timedelta(days=days_to_add)
-                return converted_dt.strftime('%Y-%m-%d')
-        except:
-            pass
-    return val_str
-
+# --------------------------------------------------
+# 📊 دالات معالجة وجلب وحفظ الأنشطة الذكية (بديل لـ Google Sheets)
+# --------------------------------------------------
 @st.cache_data(ttl=5)
-def load_data():
+def load_data_from_supabase(username, user_role, selected_scope="👥 الكل"):
     try:
-        records = sheet_main.get_all_records(value_render_option='UNFORMATTED_VALUE')
-        if len(records) == 0: 
+        # 1. إذا كان المدير يرغب في استعراض مستخدم محدد أو الكل
+        if user_role == "Admin":
+            if "All" in selected_scope or "الكل" in selected_scope:
+                response = supabase.table("activities").select("*").order("activity_date", ascending=False).order("activity_time", ascending=False).execute()
+            else:
+                response = supabase.table("activities").select("*").eq("username", selected_scope).order("activity_date", ascending=False).order("activity_time", ascending=False).execute()
+        
+        # 2. إذا كان مستخدم عادي، لا نجلب من السيرفر إلا أسطره الخاصة فقط لحل مشكلة الذاكرة (Memory Bloat)
+        else:
+            response = supabase.table("activities").select("*").eq("username", username).order("activity_date", ascending=False).order("activity_time", ascending=False).execute()
+        
+        df = pd.DataFrame(response.data)
+        if df.empty:
             return pd.DataFrame(columns=COLUMNS)
-        
-        df = pd.DataFrame(records)
-        df.dropna(how='all', inplace=True)
-        
+            
+        # ضمان وجود الأعمدة الأساسية وتطابق مسمياتها
         for col in COLUMNS:
             if col not in df.columns: 
                 df[col] = ""
-        
-        # تطبيق المعالجة المنفصلة والدقيقة لمنع تكرار تداخل الساعات مع التاريخ
-        if 'التاريخ' in df.columns:
-            df['التاريخ'] = df['التاريخ'].apply(lambda x: fix_google_serial_date(x, is_time_only=False))
-        if 'الساعة' in df.columns:
-            df['الساعة'] = df['الساعة'].apply(lambda x: fix_google_serial_date(x, is_time_only=True))
                 
-        # فرز السجلات برمجياً من الأحدث للأقدم لضمان اتساق الواجهات
-        if 'التاريخ' in df.columns and 'الساعة' in df.columns:
-            df['datetime_helper'] = pd.to_datetime(df['التاريخ'] + ' ' + df['الساعة'], errors='coerce')
-            df = df.sort_values(by='datetime_helper', ascending=False).drop(columns=['datetime_helper'])
-            
         return df[COLUMNS].reset_index(drop=True)
     except Exception as e:
         return pd.DataFrame(columns=COLUMNS)
-
-# دالة حفظ البيانات مع نظام الكاش الاحتياطي
-def save_data(df):
-    try:
-        clean_df = df[COLUMNS].copy()
-        try:
-            sheet_main.clear()
-        except:
-            pass
-            
-        req_rows = max(len(clean_df) + 50, 100)
-        req_cols = len(COLUMNS) + 5
-        if sheet_main.row_count < req_rows or sheet_main.col_count < req_cols:
-            sheet_main.resize(rows=req_rows, cols=req_cols)
-            
-        set_with_dataframe(sheet_main, clean_df, include_index=False, include_column_header=True, resize=True)
-        st.cache_data.clear()
-        return True
-    except Exception as e:
-        st.error(f"⚠️ فشل الاتصال بجوجل شيتس. جاري تفعيل الحفظ الاحتياطي المحلي لتجنب فقدان البيانات.")
-        return False
-
-# أدوات التخزين المؤقت المحلي
-def cache_offline_activity(row_dict):
-    cached_data = []
-    if os.path.exists(OFFLINE_CACHE_FILE):
-        try:
-            with open(OFFLINE_CACHE_FILE, "r", encoding="utf-8") as f:
-                cached_data = json.load(f)
-        except: pass
-    cached_data.append(row_dict)
-    with open(OFFLINE_CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cached_data, f, ensure_ascii=False, indent=4)
-
-def sync_offline_cache():
-    if os.path.exists(OFFLINE_CACHE_FILE):
-        try:
-            with open(OFFLINE_CACHE_FILE, "r", encoding="utf-8") as f:
-                cached_rows = json.load(f)
-            if cached_rows:
-                st.info(f"🔄 تم اكتشاف {len(cached_rows)} أنشطة محفوظة محلياً أثناء انقطاع الإنترنت، جاري المزامنة...")
-                current_df = load_data()
-                new_df = pd.concat([current_df, pd.DataFrame(cached_rows)], ignore_index=True)
-                if save_data(new_df):
-                    os.remove(OFFLINE_CACHE_FILE)
-                    st.success("✅ تمت مزامنة كافة الأنشطة المحلية بنجاح!")
-                    time.sleep(1)
-                    st.rerun()
-        except Exception as e:
-            pass
-
-# تشغيل الفحص الآلي للمزامنة فور تحميل التطبيق
-sync_offline_cache()
 
 # ==========================================
 # 🔐 نظام إدارة الترجمة واللغات
@@ -319,13 +156,12 @@ if not st.session_state.logged_in:
             pass_input = st.text_input(L["password_lbl"], type="password").strip()
             submitted = st.form_submit_button(L["login_btn"], use_container_width=True)
             if submitted:
-                users_df = load_users_db()
                 hashed_input = make_hashes(pass_input)
-                matched = users_df[(users_df["Username"] == user_input) & (users_df["Password"] == hashed_input)]
+                matched = check_user_login(user_input, hashed_input)
                 if not matched.empty:
                     st.session_state.logged_in = True
                     st.session_state.username = user_input
-                    st.session_state.user_role = matched.iloc[0]["Role"]
+                    st.session_state.user_role = matched.iloc[0]["role"]
                     st.success("Welcome!")
                     time.sleep(0.5)
                     st.rerun()
@@ -333,14 +169,23 @@ if not st.session_state.logged_in:
                     st.error(L["invalid_login"])
     st.stop()
 
-df_db_all = load_data()
+# إعداد نطاقات العرض بناء على نوع الحساب
+selected_scope = "👥 الكل" if lang=="العربية" else "👥 All"
+if st.session_state.user_role == "Admin":
+    registered_users = get_all_users_admin()
+    unique_users_in_db = ["👥 الكل" if lang=="العربية" else "👥 All"] + list(registered_users["username"].unique()) if not registered_users.empty else ["👥 الكل"]
+    selected_scope = st.sidebar.selectbox(L["admin_scope"], unique_users_in_db)
+
+# تحميل البيانات المفلترة للمستخدم الحالي ذكياً ومباشرة
+df_db = load_data_from_supabase(st.session_state.username, st.session_state.user_role, selected_scope)
+df_db_all = load_data_from_supabase(st.session_state.username, "Admin", "👥 الكل") # لوحة صدارة مشتركة
 
 # حساب بيانات الـ Gamification للمستخدم الحالي ديناميكياً
-user_all_logs = df_db_all[df_db_all["المستخدم"] == st.session_state.username].copy() if not df_db_all.empty else pd.DataFrame()
+user_all_logs = df_db_all[df_db_all["username"] == st.session_state.username].copy() if not df_db_all.empty else pd.DataFrame()
 user_total_hours = 0.0
 if not user_all_logs.empty:
-    user_all_logs['المدة_بالدقائق'] = pd.to_numeric(user_all_logs['المدة_بالدقائق'], errors='coerce').fillna(0)
-    user_total_hours = float(user_all_logs['المدة_بالدقائق'].sum() / 60)
+    user_all_logs['duration_minutes'] = pd.to_numeric(user_all_logs['duration_minutes'], errors='coerce').fillna(0)
+    user_total_hours = float(user_all_logs['duration_minutes'].sum() / 60)
 
 # معادلة حساب الـ XP والمستويات: كل ساعة تركيز تعطي 100 XP
 total_xp = int(user_total_hours * 100)
@@ -373,16 +218,6 @@ if st.session_state.user_role == "Admin":
     pages_available.append(L["page_admin"])
 page = st.sidebar.radio("", pages_available)
 
-if st.session_state.user_role == "Admin":
-    unique_users_in_db = ["👥 الكل" if lang=="العربية" else "👥 All"] + list(load_users_db()["Username"].unique())
-    selected_scope = st.sidebar.selectbox(L["admin_scope"], unique_users_in_db)
-    if "All" in selected_scope or "الكل" in selected_scope:
-        df_db = df_db_all.copy()
-    else:
-        df_db = df_db_all[df_db_all["المستخدم"] == selected_scope].copy()
-else:
-    df_db = df_db_all[df_db_all["المستخدم"] == st.session_state.username].copy()
-
 st.sidebar.markdown("---")
 st.sidebar.subheader(L["goals_setup"])
 DAILY_GOAL = st.sidebar.number_input(L["g_daily"], min_value=0.5, max_value=24.0, value=2.0, step=0.5)
@@ -401,28 +236,35 @@ def render_duration_section(col_context, key_prefix="default"):
         )
         st.session_state.duration_val = duration_input
 
+# نافذة حذف متطورة تستخدم الـ ID الفرعي لحذف أسطر معينة من Supabase دون مسح الجدول بالكامل
 @st.dialog(L["del_dialog_title"])
-def confirm_delete_dialog(indices, is_all=False):
+def confirm_delete_dialog(ids_to_delete=None, is_all=False):
     if is_all:
         st.warning(L["del_all_warn"])
         if st.button(L["del_all_btn"], type="primary", use_container_width=True):
-            if st.session_state.user_role == "Admin":
-                sheet_main.clear()
-                sheet_main.append_row(COLUMNS)
-            else:
-                fresh_df = df_db_all[df_db_all["المستخدم"] != st.session_state.username]
-                save_data(fresh_df)
-            st.success("Wiped!")
-            time.sleep(1)
-            st.rerun()
-    else:
-        st.warning(f"{L['del_sel_warn']} {len(indices)}")
-        if st.button(L["del_sel_btn"], type="primary", use_container_width=True):
-            updated_df = df_db_all.drop(indices).reset_index(drop=True)
-            if save_data(updated_df):
-                st.toast("Deleted!", icon="🗑️")
+            try:
+                if st.session_state.user_role == "Admin" and ("All" in selected_scope or "الكل" in selected_scope):
+                    supabase.table("activities").delete().neq("id", 0).execute() # مسح كلي آمن للـ Admin
+                else:
+                    supabase.table("activities").delete().eq("username", st.session_state.username).execute() # مسح أسطر المستخدم الحالي فقط
+                st.success("Wiped!")
+                st.cache_data.clear()
                 time.sleep(1)
                 st.rerun()
+            except Exception as e:
+                st.error(f"فشلت عملية المسح: {e}")
+    else:
+        st.warning(f"{L['del_sel_warn']} {len(ids_to_delete)}")
+        if st.button(L["del_sel_btn"], type="primary", use_container_width=True):
+            try:
+                # حذف جماعي آمن ومقنن للأسطر المحددة فقط عبر الـ IDs في السيرفر
+                supabase.table("activities").delete().in_("id", ids_to_delete).execute()
+                st.toast("Deleted!", icon="🗑️")
+                st.cache_data.clear()
+                time.sleep(1)
+                st.rerun()
+            except Exception as e:
+                st.error(f"فشلت عملية الحذف: {e}")
 
 now = datetime.datetime.now()
 today_date = now.date()
@@ -430,9 +272,9 @@ current_year = now.year
 
 if not df_db.empty:
     df_db_calc = df_db.copy()
-    df_db_calc['parsed_date'] = pd.to_datetime(df_db_calc['التاريخ'], errors='coerce')
+    df_db_calc['parsed_date'] = pd.to_datetime(df_db_calc['activity_date'], errors='coerce')
     df_db_calc['short_date'] = df_db_calc['parsed_date'].dt.strftime('%Y-%m-%d')
-    df_db_calc['المدة_بالدقائق'] = pd.to_numeric(df_db_calc['المدة_بالدقائق'], errors='coerce').fillna(0)
+    df_db_calc['duration_minutes'] = pd.to_numeric(df_db_calc['duration_minutes'], errors='coerce').fillna(0)
     df_db_calc["date_only"] = df_db_calc["parsed_date"].dt.date
 else:
     df_db_calc = df_db.copy()
@@ -448,7 +290,7 @@ if page == L["page_log"]:
     auto_time = st.toggle(L["form_auto"], value=True)
 
     default_activities = [L["gym_def"], L["study_def"], L["work_def"]]
-    existing_activities = df_db_all['النشاط'].dropna().unique().tolist() if 'النشاط' in df_db_all.columns else []
+    existing_activities = df_db_all['activity_name'].dropna().unique().tolist() if 'activity_name' in df_db_all.columns else []
     activities_list = list(set(default_activities + [x for x in existing_activities if x]))
 
     if L["act_custom_opt"] not in activities_list: activities_list.append(L["act_custom_opt"])
@@ -506,75 +348,71 @@ if page == L["page_log"]:
         combined_datetime = datetime.datetime.combine(target_date, target_time)
         duration_minutes = int(st.session_state.duration_val * 60)
         
-        new_row = {
-            'ID': int(datetime.datetime.now().timestamp() * 1000),
-            'المستخدم': st.session_state.username,
-            'التاريخ': combined_datetime.strftime('%Y-%m-%d'),
-            'السنة': int(combined_datetime.year),
-            'الشهر': str(months_list[combined_datetime.month - 1]),
-            'الأسبوع': int(combined_datetime.isocalendar().week),
-            'اليوم': str(combined_datetime.strftime('%A')),
-            'الساعة': str(combined_datetime.strftime('%H:%M:%S')),
-            'النشاط': str(final_activity),
-            'المدة_بالدقائق': duration_minutes,
-            'الملاحظات': str(activity_notes.strip())
+        # تجهيز مصفوفة البيانات المتوافقة مع بنية الأعمدة بجدول Supabase الجديد
+        new_row_data = {
+            'username': st.session_state.username,
+            'activity_date': combined_datetime.strftime('%Y-%m-%d'),
+            'year': int(combined_datetime.year),
+            'month': str(months_list[combined_datetime.month - 1]),
+            'week': int(combined_datetime.isocalendar().week),
+            'weekday': str(combined_datetime.strftime('%A')),
+            'activity_time': combined_datetime.strftime('%H:%M:%S'),
+            'activity_name': str(final_activity),
+            'duration_minutes': duration_minutes,
+            'notes': str(activity_notes.strip())
         }
         
-        updated_df_all = pd.concat([df_db_all, pd.DataFrame([new_row])], ignore_index=True)
-        
-        success = save_data(updated_df_all)
-        if not success:
-            cache_offline_activity(new_row)
-            st.toast("⚠️ تم حفظ النشاط محلياً في الكاش المؤقت لعدم وجود إنترنت!", icon="💾")
-        else:
+        try:
+            # كتابة سطر واحد نقي وخارق السرعة في السيرفر
+            supabase.table("activities").insert(new_row_data).execute()
             st.toast(L["success_toast"].format(final_activity), icon="🔥")
-            
-        time.sleep(1)
-        st.rerun()
+            st.cache_data.clear()
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            st.error(f"فشل حفظ النشاط في Supabase: {e}")
 
     if not df_db.empty:
         st.markdown("---")
         st.subheader(L["history_sub"])
         display_df = df_db.copy()
         
-        for c in COLUMNS:
-            if c not in display_df.columns: display_df[c] = ""
-            
         display_df[L['col_del']] = False
-        display_df['المدة_بالدقائق'] = pd.to_numeric(display_df['المدة_بالدقائق'], errors='coerce').fillna(0)
-        display_df[L['col_hours']] = round(display_df['المدة_بالدقائق'] / 60, 2)
+        display_df['duration_minutes'] = pd.to_numeric(display_df['duration_minutes'], errors='coerce').fillna(0)
+        display_df[L['col_hours']] = round(display_df['duration_minutes'] / 60, 2)
         
-        display_df[L['col_notes']] = display_df['الملاحظات'].astype(str).replace(["nan", "None", ""], "-")
-        display_df[L['col_ts']] = display_df['التاريخ']
-        display_df[L['col_user']] = display_df['المستخدم']
-        display_df[L['col_cat']] = display_df['النشاط']
-        display_df[L['col_wd']] = display_df['اليوم']
-        display_df[L['col_time']] = display_df['الساعة']
+        display_df[L['col_notes']] = display_df['notes'].astype(str).replace(["nan", "None", ""], "-")
+        display_df[L['col_ts']] = display_df['activity_date']
+        display_df[L['col_user']] = display_df['username']
+        display_df[L['col_cat']] = display_df['activity_name']
+        display_df[L['col_wd']] = display_df['weekday']
+        display_df[L['col_time']] = display_df['activity_time']
         
-        cols = [L['col_del'], L['col_user'], L['col_ts'], L['col_cat'], L['col_hours'], L['col_notes'], L['col_wd'], L['col_time']]
-        display_df = display_df[cols]
+        # عمود الـ ID مخفي ومحفوظ برمجياً لاستخدامه في دالة الحذف
+        cols_to_show = [L['col_del'], L['col_user'], L['col_ts'], L['col_cat'], L['col_hours'], L['col_notes'], L['col_wd'], L['col_time']]
         
         edited_display = st.data_editor(
-            display_df, column_config={L['col_del']: st.column_config.CheckboxColumn(L['col_del'], default=False)},
-            disabled=[col for col in display_df.columns if col != L['col_del']], hide_index=True, use_container_width=True, key="editor_delete"
+            display_df[cols_to_show], column_config={L['col_del']: st.column_config.CheckboxColumn(L['col_del'], default=False)},
+            disabled=[col for col in cols_to_show if col != L['col_del']], hide_index=True, use_container_width=True, key="editor_delete"
         )
         
         indices_to_delete = edited_display[edited_display[L['col_del']] == True].index
         if len(indices_to_delete) > 0:
-            master_indices = df_db.index[indices_to_delete]
+            # استخراج الـ IDs الحقيقية من السيرفر الموازية للأسطر المحددة
+            db_ids_to_delete = [int(df_db.iloc[idx]['id']) for idx in indices_to_delete]
             if st.button(L["del_selected_trigger"], type="primary"):
-                confirm_delete_dialog(master_indices, is_all=False)
+                confirm_delete_dialog(ids_to_delete=db_ids_to_delete, is_all=False)
 
         st.markdown("---")
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            df_db.drop(columns=['ID'], errors='ignore').to_excel(writer, index=False, sheet_name='Logs')
+            df_db.drop(columns=['id'], errors='ignore').to_excel(writer, index=False, sheet_name='Logs')
         st.download_button(label=L["dl_excel"], data=buffer.getvalue(), file_name="registry.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
         
         if st.button(L["wipe_all_trigger"]): confirm_delete_dialog(None, is_all=True)
 
 # ==========================================
-# 2. شاشة الإحصاءات والرسوم البيانية (لوحة التحكم والألعاب)
+# 2. شاشة الإحصاءات والرسوم البيانية
 # ==========================================
 elif page == L["page_dash"]:
     st.header(L["dash_header"])
@@ -622,15 +460,15 @@ elif page == L["page_dash"]:
             best = max(best, temp)
         best_streak = best
 
-        today_hours = round(df_db_calc[df_db_calc["date_only"] == today_date]["المدة_بالدقائق"].sum()/60, 1)
+        today_hours = round(df_db_calc[df_db_calc["date_only"] == today_date]["duration_minutes"].sum()/60, 1)
         start_week = today_date - timedelta(days=today_date.weekday())
-        week_hours = round(df_db_calc[df_db_calc["date_only"] >= start_week]["المدة_بالدقائق"].sum()/60, 1)
-        month_hours = round(df_db_calc[(pd.to_datetime(df_db_calc["date_only"]).dt.month == today_date.month) & (pd.to_datetime(df_db_calc["date_only"]).dt.year == today_date.year)]["المدة_بالدقائق"].sum()/60, 1)
+        week_hours = round(df_db_calc[df_db_calc["date_only"] >= start_week]["duration_minutes"].sum()/60, 1)
+        month_hours = round(df_db_calc[(pd.to_datetime(df_db_calc["date_only"]).dt.month == today_date.month) & (pd.to_datetime(df_db_calc["date_only"]).dt.year == today_date.year)]["duration_minutes"].sum()/60, 1)
 
     if not df_filtered.empty:
-        total_hours = round(df_filtered["المدة_بالدقائق"].sum()/60, 1)
+        total_hours = round(df_filtered["duration_minutes"].sum()/60, 1)
         activities_count = len(df_filtered)
-        if not df_filtered["النشاط"].dropna().empty: most_activity = df_filtered.groupby("النشاط")["المدة_بالدقائق"].sum().idxmax()
+        if not df_filtered["activity_name"].dropna().empty: most_activity = df_filtered.groupby("activity_name")["duration_minutes"].sum().idxmax()
 
     st.markdown(f"### {L['filter_sub']}")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -642,8 +480,6 @@ elif page == L["page_dash"]:
     c6.metric(L["metric_dominant"], most_activity)
 
     st.markdown("---")
-    
-    # قسم الألعاب والتشجيع المطور (Gamification)
     st.subheader(L["gam_badges"])
     badge_col1, badge_col2 = st.columns([1, 1])
     
@@ -667,20 +503,19 @@ elif page == L["page_dash"]:
         st.markdown(f"#### {L['gam_leaderboard']}")
         if not df_db_all.empty:
             df_lb = df_db_all.copy()
-            df_lb['parsed_date'] = pd.to_datetime(df_lb['التاريخ'], errors='coerce')
+            df_lb['parsed_date'] = pd.to_datetime(df_lb['activity_date'], errors='coerce')
             start_current_week = today_date - timedelta(days=today_date.weekday())
             
-            # فلترة سجل الأسبوع الحالي لجميع المستخدمين لبناء لوحة الصدارة المجموعاتية
             df_lb_week = df_lb[df_lb['parsed_date'].dt.date >= start_current_week].copy()
             if not df_lb_week.empty:
-                df_lb_week['المدة_بالدقائق'] = pd.to_numeric(df_lb_week['المدة_بالدقائق'], errors='coerce').fillna(0)
-                leaderboard_df = df_lb_week.groupby('المستخدم')['المدة_بالدقائق'].sum().reset_index()
-                leaderboard_df['ساعات الالتزام'] = round(leaderboard_df['المدة_بالدقائق'] / 60, 1)
+                df_lb_week['duration_minutes'] = pd.to_numeric(df_lb_week['duration_minutes'], errors='coerce').fillna(0)
+                leaderboard_df = df_lb_week.groupby('username')['duration_minutes'].sum().reset_index()
+                leaderboard_df['ساعات الالتزام'] = round(leaderboard_df['duration_minutes'] / 60, 1)
                 leaderboard_df = leaderboard_df.sort_values(by='ساعات الالتزام', ascending=False).reset_index(drop=True)
                 leaderboard_df.index += 1
                 leaderboard_df = leaderboard_df.rename_axis(L["gam_rank"]).reset_index()
                 
-                st.dataframe(leaderboard_df[[L["gam_rank"], 'المستخدم', 'ساعات الالتزام']], use_container_width=True, hide_index=True)
+                st.dataframe(leaderboard_df[[L["gam_rank"], 'username', 'ساعات الالتزام']], use_container_width=True, hide_index=True)
             else:
                 st.write("لا توجد سجلات كافية لبناء لوحة الصدارة لهذا الأسبوع حتى الآن.")
         else:
@@ -715,8 +550,8 @@ elif page == L["page_dash"]:
         days_names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
         if not df_filtered.empty:
-            user_summary = df_filtered.groupby('short_date')['المدة_بالدقائق'].sum().reset_index()
-            user_summary['Hours'] = user_summary['المدة_بالدقائق'] / 60
+            user_summary = df_filtered.groupby('short_date')['duration_minutes'].sum().reset_index()
+            user_summary['Hours'] = user_summary['duration_minutes'] / 60
             df_year_grid = pd.merge(df_year_grid, user_summary[['short_date', 'Hours']], on='short_date', how='left').fillna(0)
         else: df_year_grid['Hours'] = 0.0
 
@@ -739,9 +574,9 @@ elif page == L["page_dash"]:
 
     with col_graph2:
         st.subheader(L["pie_sub"])
-        if not df_filtered.empty and df_filtered['المدة_بالدقائق'].sum() > 0:
-            pie_data = df_filtered.groupby('النشاط')['المدة_بالدقائق'].sum().reset_index()
-            fig_pie = px.pie(pie_data, values='المدة_بالدقائق', names='النشاط', hole=0.4)
+        if not df_filtered.empty and df_filtered['duration_minutes'].sum() > 0:
+            pie_data = df_filtered.groupby('activity_name')['duration_minutes'].sum().reset_index()
+            fig_pie = px.pie(pie_data, values='duration_minutes', names='activity_name', hole=0.4)
             fig_pie.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10), showlegend=False)
             st.plotly_chart(fig_pie, use_container_width=True)
         else: st.info(L["pie_empty"])
@@ -763,31 +598,36 @@ elif page == L["page_admin"] and st.session_state.user_role == "Admin":
             create_submitted = st.form_submit_button(L["create_btn"], use_container_width=True)
             
             if create_submitted:
-                users_df = load_users_db()
-                if new_username in users_df["Username"].values:
+                users_df = get_all_users_admin()
+                if new_username in users_df["username"].values:
                     st.error("Username already exists!")
                 elif new_username == "" or new_password == "":
                     st.error("Fields cannot be empty!")
                 else:
                     hashed_pass = make_hashes(new_password)
-                    sheet_users.append_row([new_username, hashed_pass, new_role])
-                    st.cache_data.clear()
-                    st.success(f"Account for '{new_username}' created successfully!")
-                    time.sleep(1)
-                    st.rerun()
+                    try:
+                        # إنشاء مستخدم وحفظه في جدول الـ Users بـ Supabase مباشرة
+                        supabase.table("users").insert({"username": new_username, "password": hashed_pass, "role": new_role}).execute()
+                        st.cache_data.clear()
+                        st.success(f"Account for '{new_username}' created successfully!")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"فشل إدخال الحساب: {e}")
 
         st.markdown("---")
         st.subheader("👥 الحسابات المسجلة حالياً")
-        current_users = load_users_db()
-        st.dataframe(current_users[["Username", "Role"]], use_container_width=True, hide_index=True)
+        current_users = get_all_users_admin()
+        if not current_users.empty:
+            st.dataframe(current_users[["username", "role"]], use_container_width=True, hide_index=True)
 
     with admin_tab2:
         st.subheader("🔑 أداة استعادة وإعادة تعيين كلمة المرور")
         st.info("تتيح هذه الأداة للمسؤول تصفير كلمة مرور أي مستخدم فوراً وتعيين كلمة مرور مؤقتة جديدة له.")
         
-        users_df = load_users_db()
+        users_df = get_all_users_admin()
         if not users_df.empty:
-            reset_user_list = [u for u in users_df["Username"].unique() if u != st.session_state.username]
+            reset_user_list = [u for u in users_df["username"].unique() if u != st.session_state.username]
             
             if reset_user_list:
                 selected_reset_user = st.selectbox("اختر الحساب المراد تصفير كلمته:", reset_user_list)
@@ -798,23 +638,13 @@ elif page == L["page_admin"] and st.session_state.user_role == "Admin":
                         st.error("لا يمكن ترك حقل كلمة المرور فارغاً!")
                     else:
                         try:
-                            all_user_records = sheet_users.get_all_records()
-                            row_index_to_update = None
-                            
-                            for idx, record in enumerate(all_user_records):
-                                if record["Username"] == selected_reset_user:
-                                    row_index_to_update = idx + 2
-                                    break
-                            
-                            if row_index_to_update:
-                                new_hashed_pwd = make_hashes(new_temp_password.strip())
-                                sheet_users.update_cell(row_index_to_update, 2, new_hashed_pwd)
-                                st.cache_data.clear()
-                                st.success(f"✅ تم تحديث كلمة مرور الحساب '{selected_reset_user}' بنجاح!")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("تعذر العثور على سطر المستخدم في قاعدة البيانات.")
+                            new_hashed_pwd = make_hashes(new_temp_password.strip())
+                            # تحديث سطر كلمة المرور للمستخدم المعني عبر استعلام سريع وآمن في Supabase
+                            supabase.table("users").update({"password": new_hashed_pwd}).eq("username", selected_reset_user).execute()
+                            st.cache_data.clear()
+                            st.success(f"✅ تم تحديث كلمة مرور الحساب '{selected_reset_user}' بنجاح!")
+                            time.sleep(1)
+                            st.rerun()
                         except Exception as ex:
                             st.error(f"حدث خطأ أثناء الاتصال بقاعدة البيانات للتحديث: {ex}")
             else:
@@ -826,6 +656,6 @@ elif page == L["page_admin"] and st.session_state.user_role == "Admin":
         st.subheader("📋 سجل مراقبة الأنشطة العام (Admin Registry Review)")
         st.caption("عرض شامل وتفصيلي لجميع الحسابات والعمليات المدخلة على قاعدة البيانات.")
         if not df_db_all.empty:
-            st.dataframe(df_db_all.drop(columns=['ID'], errors='ignore'), use_container_width=True)
+            st.dataframe(df_db_all.drop(columns=['id'], errors='ignore'), use_container_width=True)
         else:
             st.info("لا توجد سجلات أنشطة لعرضها حالياً.")
