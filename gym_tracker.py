@@ -58,12 +58,16 @@ def load_users_db():
     except:
         return pd.DataFrame(columns=["Username", "Password", "Role"])
 
-# دالة ذكية ومحدثة لإصلاح تواريخ وساعات جوجل شيت ومنع التناقض والتداخل
+# دالة مطورة ومحدثة لإصلاح تواريخ وساعات جوجل شيت ومنع التناقض
 def fix_google_serial_date(val, is_time_only=False):
     if not val or pd.isna(val):
         return ""
     val_str = str(val).strip()
     
+    # إذا كانت القيمة مخزنة مسبقاً كنص يحتوي على تاريخ ووقت معاً (سبب المشكلة الأساسي)
+    if " " in val_str and not is_time_only:
+        return val_str.split(" ")[0] # خذ التاريخ النقي فقط
+        
     clean_numeric_check = val_str.replace('.', '', 1).replace('-', '', 1)
     if clean_numeric_check.isdigit():
         try:
@@ -71,7 +75,6 @@ def fix_google_serial_date(val, is_time_only=False):
             base_date = datetime.datetime(1899, 12, 30)
             
             if is_time_only:
-                # عزل الجزء العشري فقط لحساب الوقت النقي
                 if serial_num < 1:
                     fraction = serial_num
                 else:
@@ -82,7 +85,7 @@ def fix_google_serial_date(val, is_time_only=False):
                 seconds = total_seconds % 60
                 return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
             else:
-                # عزل الجزء الصحيح فقط لاستخراج التاريخ النقي بدون أي ساعات زائدة
+                # خذ الجزء الصحيح فقط لاستخراج التاريخ النقي وتفادي الحسابات العشرية للوقت
                 days_to_add = int(serial_num)
                 converted_dt = base_date + datetime.timedelta(days=days_to_add)
                 return converted_dt.strftime('%Y-%m-%d')
@@ -265,7 +268,7 @@ if not user_all_logs.empty:
     user_all_logs['المدة_بالدقائق'] = pd.to_numeric(user_all_logs['المدة_بالدقائق'], errors='coerce').fillna(0)
     user_total_hours = float(user_all_logs['المدة_بالدقائق'].sum() / 60)
 
-# معادلة حساب الـ XP والمستويات: كل ساعة تركيز تعطي 100 XP
+# معادلة حساب الـ XP والمستويات
 total_xp = int(user_total_hours * 100)
 current_level = 1
 xp_needed = 500
@@ -432,7 +435,7 @@ if page == L["page_log"]:
         new_row = {
             'ID': int(datetime.datetime.now().timestamp() * 1000),
             'المستخدم': st.session_state.username,
-            'التاريخ': combined_datetime.strftime('%Y-%m-%d'),
+            'التاريخ': combined_datetime.strftime('%Y-%m-%d'), # تعديل حاسم: حفظ التاريخ الصافي فقط لمنع التناقض
             'السنة': int(combined_datetime.year),
             'الشهر': str(months_list[combined_datetime.month - 1]),
             'الأسبوع': int(combined_datetime.isocalendar().week),
@@ -497,7 +500,7 @@ if page == L["page_log"]:
         if st.button(L["wipe_all_trigger"]): confirm_delete_dialog(None, is_all=True)
 
 # ==========================================
-# 2. شاشة الإحصاءات والرسوم البيانية (لوحة التحكم والألعاب)
+# 2. شاشة الإحصاءات والرسوم البيانية
 # ==========================================
 elif page == L["page_dash"]:
     st.header(L["dash_header"])
@@ -593,7 +596,6 @@ elif page == L["page_dash"]:
             df_lb['parsed_date'] = pd.to_datetime(df_lb['التاريخ'], errors='coerce')
             start_current_week = today_date - timedelta(days=today_date.weekday())
             
-            # فلترة سجل الأسبوع الحالي لجميع المستخدمين لبناء لوحة الصدارة المجموعاتية
             df_lb_week = df_lb[df_lb['parsed_date'].dt.date >= start_current_week].copy()
             if not df_lb_week.empty:
                 df_lb_week['المدة_بالدقائق'] = pd.to_numeric(df_lb_week['المدة_بالدقائق'], errors='coerce').fillna(0)
