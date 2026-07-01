@@ -1,6 +1,5 @@
 streamlit
 pandas
-pip install supabase
 google-auth
 openpyxl
 plotly
