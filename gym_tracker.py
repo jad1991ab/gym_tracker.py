@@ -1,7 +1,26 @@
+from streamlit_javascript import st_javascript
+from datetime import datetime
+import pytz
+
+# جلب المنطقة الزمنية للمستخدم
+user_timezone = st_javascript("Intl.DateTimeFormat().resolvedOptions().timeZone")
+
+# ضبط الوقت بناءً على توقيت المستخدم
+if user_timezone:
+    try:
+        tz = pytz.timezone(user_timezone)
+        now = datetime.now(tz)
+    except:
+        now = datetime.now()
+else:
+    now = datetime.now()
+
+today_date = now.date()
+current_year = now.year
 
 import streamlit as st
 import pandas as pd
-import datetime
+
 import io
 import time
 import json
@@ -13,6 +32,18 @@ import streamlit.components.v1 as components
 from datetime import timedelta
 # استدعاء مكتبة Supabase الرسمية
 from supabase import create_client, Client
+
+import subprocess
+import sys
+
+# تثبيت المكتبة تلقائياً إذا لم تكن موجودة
+try:
+    import streamlit_javascript
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit-javascript"])
+
+
+
 
 # تهيئة الصفحة الرسمية للتطبيق
 st.set_page_config(page_title="Activity Tracker Multi-User", layout="wide", page_icon="🟢")
@@ -268,7 +299,7 @@ def confirm_delete_dialog(ids_to_delete=None, is_all=False):
             except Exception as e:
                 st.error(f"فشلت عملية الحذف: {e}")
 
-now = datetime.datetime.now()
+
 today_date = now.date()
 current_year = now.year
 
