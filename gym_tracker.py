@@ -1,23 +1,4 @@
-# في أعلى ملفك، استبدل تعريف now القديم بهذا:
-from streamlit_javascript import st_javascript
-from datetime import datetime
-import pytz
 
-if 'user_now' not in st.session_state:
-    user_timezone = st_javascript("Intl.DateTimeFormat().resolvedOptions().timeZone")
-    if user_timezone:
-        try:
-            tz = pytz.timezone(user_timezone)
-            st.session_state.user_now = datetime.now(tz)
-        except:
-            st.session_state.user_now = datetime.now()
-    else:
-        st.session_state.user_now = datetime.now()
-
-# الآن استخدم هذا المتغير في كل مكان في الكود:
-now = st.session_state.user_now
-today_date = now.date()
-current_year = now.year
 
 
 import streamlit as st
@@ -44,7 +25,26 @@ try:
 except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit-javascript"])
 
+# في أعلى ملفك، استبدل تعريف now القديم بهذا:
+from streamlit_javascript import st_javascript
+from datetime import datetime
+import pytz
 
+if 'user_now' not in st.session_state:
+    user_timezone = st_javascript("Intl.DateTimeFormat().resolvedOptions().timeZone")
+    if user_timezone:
+        try:
+            tz = pytz.timezone(user_timezone)
+            st.session_state.user_now = datetime.now(tz)
+        except:
+            st.session_state.user_now = datetime.now()
+    else:
+        st.session_state.user_now = datetime.now()
+
+# الآن استخدم هذا المتغير في كل مكان في الكود:
+now = st.session_state.user_now
+today_date = now.date()
+current_year = now.year
 
 
 # تهيئة الصفحة الرسمية للتطبيق
