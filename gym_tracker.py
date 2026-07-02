@@ -285,9 +285,107 @@ else:
 
 # ==========================================
 # ==========================================
-# 1. شاشة تسجيل الأنشطة (مُحدثة بدون ميزة التسجيل التلقائي)
+# ==========================================
+# 1. شاشة تسجيل الأنشطة (بدون ميزة التسجيل التلقائي)
 # ==========================================
 if page == L["page_log"]:
+    st.header(L["log_header"])
+    st.subheader(L["form_sub"])
+
+    default_activities = [L["gym_def"], L["study_def"], L["work_def"]]
+    existing_activities = df_db_all['activity_name'].dropna().unique().tolist() if 'activity_name' in df_db_all.columns else []
+    activities_list = list(set(default_activities + [x for x in existing_activities if x]))
+
+    if L["act_custom_opt"] not in activities_list: activities_list.append(L["act_custom_opt"])
+    months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+    # نموذج الإدخال اليدوي الدائم
+    c1, c2, c3 = st.columns([2, 1.5, 1.5])
+    with c1:
+        selected_activity = st.selectbox(L["act_cat"], activities_list, key="act_manual")
+        if selected_activity == L["act_custom_opt"]: custom_activity = st.text_input(L["act_custom_lbl"], key="cust_manual")
+        activity_notes = st.text_input(L["notes_lbl"], placeholder=L["notes_ph_manual"], key="notes_manual")
+        render_duration_section(c1, key_prefix="manual_layout")
+    with c2: 
+        target_date = st.date_input(L["cal_lbl"], value=today_date)
+    with c3:
+        picked_time = st.time_input(L["clock_lbl"], value=now.time(), step=60)
+        chosen_time_str = picked_time.strftime('%H:%M')
+
+    if st.button(L["submit_btn"], use_container_width=True, type="primary"):
+        if selected_activity == L["act_custom_opt"]:
+            if 'custom_activity' in locals() and custom_activity.strip() != "": final_activity = custom_activity.strip()
+            else:
+                st.error(L["custom_err"])
+                st.stop()
+        else: final_activity = selected_activity
+
+        try:
+            t_parts = chosen_time_str.split(":")
+            target_time = datetime.time(int(t_parts[0]), int(t_parts[1]))
+        except: target_time = now.time()
+
+        combined_datetime = datetime.datetime.combine(target_date, target_time)
+        duration_minutes = int(st.session_state.duration_val * 60)
+        
+        new_row_data = {
+            'username': st.session_state.username,
+            'activity_date': combined_datetime.strftime('%Y-%m-%d'),
+            'year': int(combined_datetime.year),
+            'month': str(months_list[combined_datetime.month - 1]),
+            'week': int(combined_datetime.isocalendar().week),
+            'weekday': str(combined_datetime.strftime('%A')),
+            'activity_time': combined_datetime.strftime('%H:%M:%S'),
+            'activity_name': str(final_activity),
+            'duration_minutes': duration_minutes,
+            'notes': str(activity_notes.strip())
+        }
+        
+        try:
+            supabase.table("activities").insert(new_row_data).execute()
+            st.toast(L["success_toast"].format(final_activity), icon="🔥")
+            st.cache_data.clear()
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            st.error(f"فشل حفظ النشاط في Supabase: {e}")
+
+    # عرض جدول البيانات كما كان سابقاً
+    if not df_db.empty:
+        st.markdown("---")
+        st.subheader(L["history_sub"])
+        # ... (باقي كود عرض الجدول والـ data_editor يظل كما هو دون تغيير)
+        display_df = df_db.copy()
+        display_df[L['col_del']] = False
+        display_df['duration_minutes'] = pd.to_numeric(display_df['duration_minutes'], errors='coerce').fillna(0)
+        display_df[L['col_hours']] = round(display_df['duration_minutes'] / 60, 2)
+        display_df[L['col_notes']] = display_df['notes'].astype(str).replace(["nan", "None", ""], "-")
+        display_df[L['col_ts']] = display_df['activity_date']
+        display_df[L['col_user']] = display_df['username']
+        display_df[L['col_cat']] = display_df['activity_name']
+        display_df[L['col_wd']] = display_df['weekday']
+        display_df[L['col_time']] = display_df['activity_time']
+        
+        cols_to_show = [L['col_del'], L['col_user'], L['col_ts'], L['col_cat'], L['col_hours'], L['col_notes'], L['col_wd'], L['col_time']]
+        
+        edited_display = st.data_editor(
+            display_df[cols_to_show], column_config={L['col_del']: st.column_config.CheckboxColumn(L['col_del'], default=False)},
+            disabled=[col for col in cols_to_show if col != L['col_del']], hide_index=True, use_container_width=True, key="editor_delete"
+        )
+        
+        indices_to_delete = edited_display[edited_display[L['col_del']] == True].index
+        if len(indices_to_delete) > 0:
+            db_ids_to_delete = [int(df_db.iloc[idx]['id']) for idx in indices_to_delete]
+            if st.button(L["del_selected_trigger"], type="primary"):
+                confirm_delete_dialog(ids_to_delete=db_ids_to_delete, is_all=False)
+
+        st.markdown("---")
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            df_db.drop(columns=['id'], errors='ignore').to_excel(writer, index=False, sheet_name='Logs')
+        st.download_button(label=L["dl_excel"], data=buffer.getvalue(), file_name="registry.xlsx", mime="application/vnd.ms-excel", use_container_width=True)
+        
+        if st.button(L["wipe_all_trigger"]): confirm_delete_dialog(None, is_all=True)
     st.header(L["log_header"])
     st.subheader(L["form_sub"])
 
