@@ -65,13 +65,13 @@ def load_data_from_supabase(username, user_role, selected_scope="👥 الكل")
         # 1. إذا كان المدير يرغب في استعراض مستخدم محدد أو الكل
         if user_role == "Admin":
             if "All" in selected_scope or "الكل" in selected_scope:
-                response = supabase.table("activities").select("*").order("activity_date", ascending=False).order("activity_time", ascending=False).execute()
+                response = supabase.table("activities").select("*").order("activity_date", desc=True).order("activity_time", desc=True).execute()
             else:
-                response = supabase.table("activities").select("*").eq("username", selected_scope).order("activity_date", ascending=False).order("activity_time", ascending=False).execute()
+                response = supabase.table("activities").select("*").eq("username", selected_scope).order("activity_date", desc=True).order("activity_time", desc=True).execute()
         
         # 2. إذا كان مستخدم عادي، لا نجلب من السيرفر إلا أسطره الخاصة فقط لحل مشكلة الذاكرة (Memory Bloat)
         else:
-            response = supabase.table("activities").select("*").eq("username", username).order("activity_date", ascending=False).order("activity_time", ascending=False).execute()
+            response = supabase.table("activities").select("*").eq("username", username).order("activity_date", desc=True).order("activity_time", desc=True).execute()
         
         df = pd.DataFrame(response.data)
         if df.empty:
@@ -84,7 +84,7 @@ def load_data_from_supabase(username, user_role, selected_scope="👥 الكل")
                 
         return df[COLUMNS].reset_index(drop=True)
     except Exception as e:
-        st.error(f"⚠️ Load failed: {e}")   # <-- add this line temporarily
+        st.error(f"⚠️ فشل تحميل البيانات: {e}")
         return pd.DataFrame(columns=COLUMNS)
 
 # ==========================================
