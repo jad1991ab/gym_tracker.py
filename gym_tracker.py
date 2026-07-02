@@ -268,9 +268,7 @@ def confirm_delete_dialog(ids_to_delete=None, is_all=False):
             except Exception as e:
                 st.error(f"فشلت عملية الحذف: {e}")
 
-# REPLACE WITH THIS:
-sweden_tz = pytz.timezone("Europe/Stockholm")
-now = datetime.datetime.now(sweden_tz)
+now = datetime.datetime.now()
 today_date = now.date()
 current_year = now.year
 
