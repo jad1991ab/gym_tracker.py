@@ -301,6 +301,7 @@ if page == L["page_log"]:
     chosen_time_str = now.strftime('%H:%M')
 
     if auto_time:
+        st.info(f"📅 {today_date.strftime('%Y-%m-%d')}  |  ⏰ {now.strftime('%H:%M:%S')}  ({now.strftime('%A')})")
         c1, c2 = st.columns(2)
         with c1:
             selected_activity = st.selectbox(L["act_cat"], activities_list, key="act_auto")
