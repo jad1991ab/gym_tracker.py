@@ -84,6 +84,7 @@ def load_data_from_supabase(username, user_role, selected_scope="👥 الكل")
                 
         return df[COLUMNS].reset_index(drop=True)
     except Exception as e:
+        st.error(f"⚠️ Load failed: {e}")   # <-- add this line temporarily
         return pd.DataFrame(columns=COLUMNS)
 
 # ==========================================
