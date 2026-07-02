@@ -284,9 +284,77 @@ else:
     df_db_calc["date_only"] = pd.Series(dtype='object')
 
 # ==========================================
-# 1. شاشة تسجيل الأنشطة
+
+# ==========================================
+# 1. شاشة تسجيل الأنشطة (معدلة: تم حذف التسجيل التلقائي)
 # ==========================================
 if page == L["page_log"]:
+    st.header(L["log_header"])
+    st.subheader(L["form_sub"])
+
+    default_activities = [L["gym_def"], L["study_def"], L["work_def"]]
+    existing_activities = df_db_all['activity_name'].dropna().unique().tolist() if 'activity_name' in df_db_all.columns else []
+    activities_list = list(set(default_activities + [x for x in existing_activities if x]))
+
+    if L["act_custom_opt"] not in activities_list: activities_list.append(L["act_custom_opt"])
+    months_list = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+    # عرض نموذج الإدخال اليدوي دائماً
+    c1, c2, c3 = st.columns([2, 1.5, 1.5])
+    with c1:
+        selected_activity = st.selectbox(L["act_cat"], activities_list, key="act_manual")
+        if selected_activity == L["act_custom_opt"]: 
+            custom_activity = st.text_input(L["act_custom_lbl"], key="cust_manual")
+        activity_notes = st.text_input(L["notes_lbl"], placeholder=L["notes_ph_manual"], key="notes_manual")
+    render_duration_section(c1, key_prefix="manual_layout") # تم نقل المدة هنا لتناسب التنسيق
+    with c2: 
+        target_date = st.date_input(L["cal_lbl"], value=today_date)
+    with c3:
+        picked_time = st.time_input(L["clock_lbl"], value=now.time(), key="manual_time_picker", step=60)
+        chosen_time_str = picked_time.strftime('%H:%M')
+
+    if st.button(L["submit_btn"], use_container_width=True, type="primary"):
+        if selected_activity == L["act_custom_opt"]:
+            if 'custom_activity' in locals() and custom_activity.strip() != "": 
+                final_activity = custom_activity.strip()
+            else:
+                st.error(L["custom_err"])
+                st.stop()
+        else: 
+            final_activity = selected_activity
+
+        # استخدام الوقت المختار يدوياً دائماً
+        try:
+            t_parts = chosen_time_str.split(":")
+            target_time = datetime.time(int(t_parts[0]), int(t_parts[1]))
+        except: 
+            target_time = now.time()
+
+        combined_datetime = datetime.datetime.combine(target_date, target_time)
+        duration_minutes = int(st.session_state.duration_val * 60)
+        
+        new_row_data = {
+            'username': st.session_state.username,
+            'activity_date': combined_datetime.strftime('%Y-%m-%d'),
+            'year': int(combined_datetime.year),
+            'month': str(months_list[combined_datetime.month - 1]),
+            'week': int(combined_datetime.isocalendar().week),
+            'weekday': str(combined_datetime.strftime('%A')),
+            'activity_time': combined_datetime.strftime('%H:%M:%S'),
+            'activity_name': str(final_activity),
+            'duration_minutes': duration_minutes,
+            'notes': str(activity_notes.strip())
+        }
+        
+        try:
+            supabase.table("activities").insert(new_row_data).execute()
+            st.toast(L["success_toast"].format(final_activity), icon="🔥")
+            st.cache_data.clear()
+            time.sleep(1)
+            st.rerun()
+        except Exception as e:
+            st.error(f"فشل حفظ النشاط في Supabase: {e}")
+
     st.header(L["log_header"])
     st.subheader(L["form_sub"])
     auto_time = st.toggle(L["form_auto"], value=True)
