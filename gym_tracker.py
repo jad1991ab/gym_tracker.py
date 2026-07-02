@@ -1,3 +1,4 @@
+import pytz
 import streamlit as st
 import pandas as pd
 import datetime
@@ -267,7 +268,9 @@ def confirm_delete_dialog(ids_to_delete=None, is_all=False):
             except Exception as e:
                 st.error(f"فشلت عملية الحذف: {e}")
 
-now = datetime.datetime.now()
+# REPLACE WITH THIS:
+sweden_tz = pytz.timezone("Europe/Stockholm")
+now = datetime.datetime.now(sweden_tz)
 today_date = now.date()
 current_year = now.year
 
