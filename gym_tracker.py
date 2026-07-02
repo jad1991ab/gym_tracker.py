@@ -317,20 +317,8 @@ if page == L["page_log"]:
         render_duration_section(c1, key_prefix="manual_layout")
         with c2: target_date = st.date_input(L["cal_lbl"], value=today_date)
         with c3:
-            clock_html = f"""
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; font-family:sans-serif; width: 100%;">
-                <label style='font-size:14px; font-weight:bold; color:#216e39; margin-bottom:8px; text-align:center;'>{L['clock_lbl']}</label>
-                <input type="time" id="analog_picker" value="{chosen_time_str}" style="font-size:20px; padding:8px; border-radius:8px; border:2px solid #40c463; text-align:center; width:170px; font-weight:bold; color:#216e39; background-color:#fff;">
-            </div>
-            <script>
-                var picker = document.getElementById('analog_picker');
-                function emitTime() {{ window.parent.postMessage({{type: 'streamlit:setComponentValue', value: picker.value}}, '*'); }}
-                picker.addEventListener('input', emitTime); picker.addEventListener('change', emitTime);
-                setTimeout(emitTime, 250);
-            </script>
-            """
-            clock_return = components.html(clock_html, height=130)
-            if clock_return: chosen_time_str = str(clock_return)
+            picked_time = st.time_input(L["clock_lbl"], value=now.time(), key="manual_time_picker", step=60)
+            chosen_time_str = picked_time.strftime('%H:%M')
 
     if st.button(L["submit_btn"], use_container_width=True, type="primary"):
         if selected_activity == L["act_custom_opt"]:
